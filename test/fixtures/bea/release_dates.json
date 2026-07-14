@@ -1,0 +1,7 @@
+{
+  "release_dates": [
+    { "id": "bea-gdp-2026-07-30", "date": "2026-07-30", "time": "8:30 AM", "release": "GDP (Advance Estimate), 2nd Quarter 2026" },
+    { "id": "bea-pio-2026-07-30", "date": "2026-07-30", "time": "8:30 AM", "release": "Personal Income and Outlays, June 2026" },
+    { "id": "bea-trade-2026-08-04", "date": "2026-08-04", "time": "8:30 AM", "release": "U.S. International Trade in Goods and Services, June 2026" }
+  ]
+}

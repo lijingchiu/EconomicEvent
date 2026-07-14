@@ -5,6 +5,7 @@ import { assertHtmlResponse, parseHtmlTableRows } from "../parsers/html";
 import { dateAndTimeToUtc, eventFromRelease, inRange, parseDateOnly } from "./helpers";
 
 const URL = "https://www.ismworld.org/supply-management-news-and-reports/reports/rob-report-calendar/";
+const USER_AGENT = "EconomicEventBot/1.0 (+https://github.com/lijingchiu/EconomicEvent)";
 const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 
 function numberCell(value: string | undefined): string | undefined {
@@ -21,7 +22,7 @@ export class IsmProvider implements EconomicCalendarProvider {
     const warnings: ProviderWarning[] = [];
     const events: EconomicEvent[] = [];
     try {
-      const response = await fetchWithTimeout(URL, { headers: { accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1" } });
+      const response = await fetchWithTimeout(URL, { headers: { accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1", "user-agent": USER_AGENT } });
       const body = await readBodyWithLimit(response);
       assertHtmlResponse(response, body);
       const rows = parseHtmlTableRows(body);

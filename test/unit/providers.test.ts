@@ -71,6 +71,16 @@ describe("official provider adapters", () => {
     expect(result.events[2].eventTimeUtc).toBe("2026-08-03T14:00:00.000Z");
   });
 
+  it("sends a descriptive User-Agent to the ISM calendar", async () => {
+    const requests: RequestInit[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(init ?? {});
+      return new Response(read("test/fixtures/ism/calendar.html"), { headers: { "content-type": "text/html; charset=utf-8" } });
+    }));
+    await new IsmProvider().fetchEvents(range, env);
+    expect(new Headers(requests[0]?.headers).get("user-agent")).toBe("EconomicEventBot/1.0 (+https://github.com/lijingchiu/EconomicEvent)");
+  });
+
   it("builds Michigan preliminary and final dates from the official release schedule", async () => {
     mockFetch({ "docid=75443": { body: "%PDF-1.7 official schedule", contentType: "application/pdf" } });
     const result = await new UmichProvider().fetchEvents(range, env);

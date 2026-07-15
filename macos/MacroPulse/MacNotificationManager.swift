@@ -250,13 +250,21 @@ final class MacNotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
         let content = UNMutableNotificationContent()
         content.title = event.name
-        content.subtitle = "(event.provider.uppercased()) · 提前 (minutesBeforeRelease) 分鐘提醒"
-        content.body = notificationDetails(event, releaseDate: releaseDate, prefix: "距離公布約 (minutesBeforeRelease) 分鐘")
+        content.subtitle = event.provider.uppercased() + " · 提前 " + String(minutesBeforeRelease) + " 分鐘提醒"
+        content.body = notificationDetails(
+            event,
+            releaseDate: releaseDate,
+            prefix: "距離公布約 " + String(minutesBeforeRelease) + " 分鐘"
+        )
         content.sound = .default
         content.threadIdentifier = "economic-release-reminders"
         content.userInfo = ["eventID": event.id, "reminderMinutes": minutesBeforeRelease]
 
-        let request = UNNotificationRequest(identifier: "reminder-(UUID().uuidString)", content: content, trigger: nil)
+        let request = UNNotificationRequest(
+            identifier: "reminder-" + UUID().uuidString,
+            content: content,
+            trigger: nil
+        )
         center.add(request) { [weak self] error in
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -288,7 +296,11 @@ final class MacNotificationManager: NSObject, UNUserNotificationCenterDelegate {
         let content = UNMutableNotificationContent()
         content.title = event.name
         content.subtitle = "\(event.provider.uppercased()) · 當期數據已公布"
-        content.body = "Actual 當期 \(actualText)  ·  Forecast 預期 \(forecastText)  ·  Prior 前值 \(priorText)"
+        content.body = notificationDetails(
+            event,
+            releaseDate: releaseDate,
+            prefix: "Actual 當期 " + actualText + " · Forecast 預期 " + forecastText + " · Prior 前值 " + priorText
+        )
         content.sound = .default
         content.threadIdentifier = "economic-release-results"
         content.userInfo = ["eventID": event.id, "actual": actual]
@@ -322,10 +334,12 @@ final class MacNotificationManager: NSObject, UNUserNotificationCenterDelegate {
         let releaseText = formatter.string(from: releaseDate)
         let category = event.category?.isEmpty == false ? event.category! : "經濟數據"
         let impact = event.impact?.isEmpty == false ? event.impact! : "—"
-        return "(prefix)
-公布時間 (releaseText)
-分類 (category) · 影響 (impact)
-可能影響 (marketLabels(from: event.affectedMarketsJson))"
+        return [
+            prefix,
+            "公布時間 " + releaseText,
+            "分類 " + category + " · 影響 " + impact,
+            "可能影響 " + marketLabels(from: event.affectedMarketsJson),
+        ].joined(separator: "\n")
     }
 
     private func marketLabels(from json: String?) -> String {

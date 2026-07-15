@@ -984,3 +984,40 @@ html.native-macos-app .side-column.modal-backdrop > .editorial-panel .panel-code
     padding-right: 52px;
   }
 }
+
+
+/* Dense frosted chrome beneath the native toolbar. */
+html.native-macos-app .site-header {
+  isolation: isolate;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--line-strong) 78%, var(--glass-highlight));
+  background: color-mix(in srgb, var(--paper-raised) 88%, transparent);
+  box-shadow:
+    0 18px 55px rgba(20, 36, 56, .18),
+    inset 0 0 0 1px color-mix(in srgb, var(--glass-highlight) 72%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, .28);
+  backdrop-filter: blur(44px) saturate(145%);
+  -webkit-backdrop-filter: blur(44px) saturate(145%);
+}
+
+html.native-macos-app .site-header::before {
+  inset: 1px;
+  z-index: 0;
+  border-radius: calc(22px - 1px);
+  opacity: .72;
+  background:
+    radial-gradient(circle at var(--glass-x) -12px, rgba(255,255,255,.28), transparent 22rem),
+    linear-gradient(110deg, rgba(255,255,255,.14), transparent 42%);
+}
+
+html.native-macos-app .site-header .header-inner {
+  z-index: 1;
+}
+
+html.native-macos-app[data-theme="dark"] .site-header {
+  background: color-mix(in srgb, var(--paper-raised) 91%, transparent);
+  box-shadow:
+    0 18px 58px rgba(0, 0, 0, .34),
+    inset 0 0 0 1px rgba(255, 255, 255, .13),
+    inset 0 1px 0 rgba(255, 255, 255, .16);
+}

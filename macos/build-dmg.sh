@@ -6,9 +6,11 @@ BUILD_ROOT="${PROJECT_ROOT}/.build/macos"
 DIST_DIR="${PROJECT_ROOT}/dist"
 APP_NAME="Macro Pulse"
 EXECUTABLE_NAME="MacroPulse"
+HELPER_NAME="MacroPulseUpdater"
 WIDGET_NAME="MacroPulseWidget"
 APP_BUNDLE="${BUILD_ROOT}/${APP_NAME}.app"
 CONTENTS="${APP_BUNDLE}/Contents"
+HELPERS="${CONTENTS}/Helpers"
 PLUGINS="${CONTENTS}/PlugIns"
 WIDGET_BUNDLE="${PLUGINS}/${WIDGET_NAME}.appex"
 WIDGET_CONTENTS="${WIDGET_BUNDLE}/Contents"
@@ -19,7 +21,7 @@ BUILD_NUMBER="${GITHUB_RUN_NUMBER:-1}"
 APP_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "${PROJECT_ROOT}/macos/MacroPulse/Info.plist")"
 
 rm -rf "${BUILD_ROOT}" "${DIST_DIR}"
-mkdir -p   "${CONTENTS}/MacOS"   "${CONTENTS}/Resources"   "${WIDGET_CONTENTS}/MacOS"   "${DIST_DIR}"
+mkdir -p   "${CONTENTS}/MacOS"   "${CONTENTS}/Resources"   "${HELPERS}"   "${WIDGET_CONTENTS}/MacOS"   "${DIST_DIR}"
 
 xcrun swiftc --version
 xcodebuild -version
@@ -28,11 +30,16 @@ APP_SOURCES=("${PROJECT_ROOT}/macos/MacroPulse/"*.swift)
 for architecture in arm64 x86_64; do
   xcrun swiftc     -O     -warnings-as-errors     -target "${architecture}-apple-macos13.0"     -sdk "${SDK_PATH}"     "${APP_SOURCES[@]}"     -framework Cocoa     -framework WebKit     -framework Security     -framework CryptoKit     -o "${BUILD_ROOT}/${EXECUTABLE_NAME}-${architecture}"
 
+  xcrun swiftc     -O     -warnings-as-errors     -target "${architecture}-apple-macos13.0"     -sdk "${SDK_PATH}"     "${PROJECT_ROOT}/macos/MacroPulseUpdater/main.swift"     -framework Foundation     -o "${BUILD_ROOT}/${HELPER_NAME}-${architecture}"
+
   xcrun swiftc     -O     -warnings-as-errors     -parse-as-library     -application-extension     -target "${architecture}-apple-macos13.0"     -sdk "${SDK_PATH}"     "${PROJECT_ROOT}/macos/MacroPulseWidget/MacroPulseWidget.swift"     -framework Foundation     -framework SwiftUI     -framework WidgetKit     -o "${BUILD_ROOT}/${WIDGET_NAME}-${architecture}"
 done
 
 lipo -create   "${BUILD_ROOT}/${EXECUTABLE_NAME}-arm64"   "${BUILD_ROOT}/${EXECUTABLE_NAME}-x86_64"   -output "${CONTENTS}/MacOS/${EXECUTABLE_NAME}"
 chmod 755 "${CONTENTS}/MacOS/${EXECUTABLE_NAME}"
+
+lipo -create   "${BUILD_ROOT}/${HELPER_NAME}-arm64"   "${BUILD_ROOT}/${HELPER_NAME}-x86_64"   -output "${HELPERS}/${HELPER_NAME}"
+chmod 755 "${HELPERS}/${HELPER_NAME}"
 
 lipo -create   "${BUILD_ROOT}/${WIDGET_NAME}-arm64"   "${BUILD_ROOT}/${WIDGET_NAME}-x86_64"   -output "${WIDGET_CONTENTS}/MacOS/${WIDGET_NAME}"
 chmod 755 "${WIDGET_CONTENTS}/MacOS/${WIDGET_NAME}"
@@ -53,6 +60,7 @@ ICONSET="${BUILD_ROOT}/AppIcon.iconset"
 xcrun swift "${PROJECT_ROOT}/macos/scripts/generate-icon.swift" "${ICONSET}"
 iconutil --convert icns "${ICONSET}" --output "${CONTENTS}/Resources/AppIcon.icns"
 
+codesign --force --sign - --timestamp=none "${HELPERS}/${HELPER_NAME}"
 codesign   --force   --sign -   --timestamp=none   --entitlements "${PROJECT_ROOT}/macos/MacroPulseWidget/MacroPulseWidget.entitlements"   "${WIDGET_BUNDLE}"
 codesign --force --sign - --timestamp=none "${APP_BUNDLE}"
 codesign --verify --deep --strict --verbose=2 "${APP_BUNDLE}"
@@ -70,8 +78,8 @@ hdiutil verify "${DMG_PATH}"
 )
 
 file "${CONTENTS}/MacOS/${EXECUTABLE_NAME}"
+file "${HELPERS}/${HELPER_NAME}"
 file "${WIDGET_CONTENTS}/MacOS/${WIDGET_NAME}"
 codesign --display --verbose=2 "${APP_BUNDLE}"
-codesign --display --entitlements :- "${WIDGET_BUNDLE}"
-find "${PLUGINS}" -maxdepth 4 -type f -print
+find "${HELPERS}" "${PLUGINS}" -maxdepth 4 -type f -print
 ls -lh "${DMG_PATH}" "${DMG_PATH}.sha256"

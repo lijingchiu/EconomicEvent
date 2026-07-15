@@ -15,7 +15,7 @@ enum UpdateState {
     case checking
     case current(String)
     case available(AppUpdate)
-    case downloading(AppUpdate)
+    case downloading(AppUpdate, Double)
     case downloaded(AppUpdate, URL)
     case failed(String)
 }
@@ -24,17 +24,14 @@ final class UpdateManager {
     var onStateChange: ((UpdateState) -> Void)?
 
     private(set) var state: UpdateState = .idle {
-        didSet {
-            onStateChange?(state)
-        }
+        didSet { onStateChange?(state) }
     }
 
-    private let releasesURL = URL(
-        string: "https://api.github.com/repos/lijingchiu/EconomicEvent/releases?per_page=50"
-    )!
+    private let releasesURL = URL(string: "https://api.github.com/repos/lijingchiu/EconomicEvent/releases?per_page=50")!
     private let assetName = "MacroPulse-macOS-Universal.dmg"
     private var checkTask: URLSessionDataTask?
     private var downloadTask: URLSessionDownloadTask?
+    private var progressObservation: NSKeyValueObservation?
 
     private var currentVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
@@ -45,10 +42,7 @@ final class UpdateManager {
     }
 
     func check() {
-        guard checkTask == nil, downloadTask == nil else {
-            return
-        }
-
+        guard checkTask == nil, downloadTask == nil else { return }
         state = .checking
 
         var request = URLRequest(url: releasesURL)
@@ -59,24 +53,15 @@ final class UpdateManager {
         request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
 
         let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            guard let self else {
-                return
-            }
-
+            guard let self else { return }
             let result: UpdateState
             do {
-                if let error {
-                    throw error
-                }
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    throw UpdateError.invalidResponse
-                }
+                if let error { throw error }
+                guard let httpResponse = response as? HTTPURLResponse else { throw UpdateError.invalidResponse }
                 guard (200..<300).contains(httpResponse.statusCode) else {
                     throw UpdateError.httpStatus(httpResponse.statusCode)
                 }
-                guard let data else {
-                    throw UpdateError.invalidResponse
-                }
+                guard let data else { throw UpdateError.invalidResponse }
 
                 let releases = try JSONDecoder().decode([GitHubRelease].self, from: data)
                 if let update = self.newestUpdate(in: releases) {
@@ -93,20 +78,13 @@ final class UpdateManager {
                 self.state = result
             }
         }
-
         checkTask = task
         task.resume()
     }
 
     func downloadAvailableUpdate() {
-        guard case let .available(update) = state,
-              checkTask == nil,
-              downloadTask == nil
-        else {
-            return
-        }
-
-        state = .downloading(update)
+        guard case let .available(update) = state, checkTask == nil, downloadTask == nil else { return }
+        state = .downloading(update, 0)
 
         var request = URLRequest(url: update.downloadURL)
         request.timeoutInterval = 120
@@ -115,39 +93,43 @@ final class UpdateManager {
         request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
 
         let task = URLSession.shared.downloadTask(with: request) { [weak self] temporaryURL, response, error in
-            guard let self else {
-                return
-            }
-
+            guard let self else { return }
             let result: UpdateState
             do {
-                if let error {
-                    throw error
-                }
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    throw UpdateError.invalidResponse
-                }
+                if let error { throw error }
+                guard let httpResponse = response as? HTTPURLResponse else { throw UpdateError.invalidResponse }
                 guard (200..<300).contains(httpResponse.statusCode) else {
                     throw UpdateError.httpStatus(httpResponse.statusCode)
                 }
-                guard let temporaryURL else {
-                    throw UpdateError.invalidResponse
-                }
+                guard let temporaryURL else { throw UpdateError.invalidResponse }
 
                 try self.verifyDownload(at: temporaryURL, expectedDigest: update.digest)
-                let destination = try self.moveToDownloads(temporaryURL, version: update.version)
+                let destination = try self.stageDownloadedDMG(
+                    temporaryURL,
+                    version: update.version,
+                    buildNumber: update.buildNumber
+                )
                 result = .downloaded(update, destination)
             } catch {
                 result = .failed(error.localizedDescription)
             }
 
             DispatchQueue.main.async {
+                self.progressObservation = nil
                 self.downloadTask = nil
                 self.state = result
             }
         }
 
         downloadTask = task
+        progressObservation = task.progress.observe(\.fractionCompleted, options: [.initial, .new]) {
+            [weak self] progress, _ in
+            let fraction = min(max(progress.fractionCompleted, 0), 1)
+            DispatchQueue.main.async {
+                guard let self, self.downloadTask != nil else { return }
+                self.state = .downloading(update, fraction)
+            }
+        }
         task.resume()
     }
 
@@ -155,14 +137,9 @@ final class UpdateManager {
         let candidates = releases.compactMap { release -> AppUpdate? in
             guard !release.draft,
                   let releaseVersion = version(from: release.tagName),
-                  isNewer(
-                      version: releaseVersion.version,
-                      buildNumber: releaseVersion.build
-                  ),
+                  isNewer(version: releaseVersion.version, buildNumber: releaseVersion.build),
                   let asset = release.assets.first(where: { $0.name == assetName })
-            else {
-                return nil
-            }
+            else { return nil }
 
             return AppUpdate(
                 version: releaseVersion.version,
@@ -175,24 +152,18 @@ final class UpdateManager {
         }
 
         return candidates.max {
-            let versionComparison = compare($0.version, $1.version)
-            if versionComparison == .orderedSame {
-                return $0.buildNumber < $1.buildNumber
-            }
-            return versionComparison == .orderedAscending
+            let comparison = compare($0.version, $1.version)
+            return comparison == .orderedSame
+                ? $0.buildNumber < $1.buildNumber
+                : comparison == .orderedAscending
         }
     }
 
     private func version(from tagName: String) -> (version: String, build: Int)? {
         let prefix = "macos-v"
-        guard tagName.hasPrefix(prefix) else {
-            return nil
-        }
-
+        guard tagName.hasPrefix(prefix) else { return nil }
         let remainder = tagName.dropFirst(prefix.count)
-        guard let separator = remainder.range(of: "-build-") else {
-            return nil
-        }
+        guard let separator = remainder.range(of: "-build-") else { return nil }
 
         let version = String(remainder[..<separator.lowerBound])
         let buildString = String(remainder[separator.upperBound...])
@@ -200,71 +171,56 @@ final class UpdateManager {
         guard components.count >= 3,
               components.allSatisfy({ Int($0) != nil }),
               let build = Int(buildString)
-        else {
-            return nil
-        }
+        else { return nil }
         return (version: version, build: build)
     }
 
     private func isNewer(version: String, buildNumber: Int) -> Bool {
-        let versionComparison = compare(version, currentVersion)
-        if versionComparison == .orderedDescending {
-            return true
-        }
-        if versionComparison == .orderedSame {
-            return buildNumber > currentBuildNumber
-        }
-        return false
+        let comparison = compare(version, currentVersion)
+        return comparison == .orderedDescending
+            || (comparison == .orderedSame && buildNumber > currentBuildNumber)
     }
 
     private func compare(_ lhs: String, _ rhs: String) -> ComparisonResult {
         let left = lhs.split(separator: ".").map { Int($0) ?? 0 }
         let right = rhs.split(separator: ".").map { Int($0) ?? 0 }
-
         for index in 0..<max(left.count, right.count) {
             let leftValue = index < left.count ? left[index] : 0
             let rightValue = index < right.count ? right[index] : 0
-            if leftValue < rightValue {
-                return .orderedAscending
-            }
-            if leftValue > rightValue {
-                return .orderedDescending
-            }
+            if leftValue < rightValue { return .orderedAscending }
+            if leftValue > rightValue { return .orderedDescending }
         }
         return .orderedSame
     }
 
     private func verifyDownload(at url: URL, expectedDigest: String?) throws {
-        guard let expectedDigest,
-              expectedDigest.lowercased().hasPrefix("sha256:")
-        else {
+        guard let expectedDigest, expectedDigest.lowercased().hasPrefix("sha256:") else {
             throw UpdateError.missingDigest
         }
-
         let expected = String(expectedDigest.dropFirst("sha256:".count)).lowercased()
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
-        let actual = SHA256.hash(data: data)
-            .map { String(format: "%02x", $0) }
-            .joined()
-
-        guard actual == expected else {
-            throw UpdateError.checksumMismatch
-        }
+        let actual = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        guard actual == expected else { throw UpdateError.checksumMismatch }
     }
 
-    private func moveToDownloads(_ temporaryURL: URL, version: String) throws -> URL {
+    private func stageDownloadedDMG(
+        _ temporaryURL: URL,
+        version: String,
+        buildNumber: Int
+    ) throws -> URL {
         let fileManager = FileManager.default
-        let downloadsDirectory = fileManager.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        let cacheRoot = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? fileManager.temporaryDirectory
-        try fileManager.createDirectory(
-            at: downloadsDirectory,
-            withIntermediateDirectories: true
-        )
+        let updateDirectory = cacheRoot
+            .appendingPathComponent("MacroPulse", isDirectory: true)
+            .appendingPathComponent("Updates", isDirectory: true)
+        try fileManager.createDirectory(at: updateDirectory, withIntermediateDirectories: true)
 
         let safeVersion = version.filter { $0.isNumber || $0 == "." || $0 == "-" }
-        let destination = downloadsDirectory
-            .appendingPathComponent("MacroPulse-\(safeVersion).dmg", isDirectory: false)
-
+        let destination = updateDirectory.appendingPathComponent(
+            "MacroPulse-\(safeVersion)-build-\(buildNumber).dmg",
+            isDirectory: false
+        )
         if fileManager.fileExists(atPath: destination.path) {
             try fileManager.removeItem(at: destination)
         }
@@ -314,7 +270,7 @@ private enum UpdateError: LocalizedError {
         case .missingDigest:
             return "The update could not be verified because its SHA-256 digest is missing."
         case .checksumMismatch:
-            return "The downloaded update failed SHA-256 verification and was not saved."
+            return "The downloaded update failed SHA-256 verification and was discarded."
         }
     }
 }

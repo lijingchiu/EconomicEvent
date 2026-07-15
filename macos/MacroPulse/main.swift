@@ -13,8 +13,6 @@ private extension NSToolbarItem.Identifier {
     static let navigation = NSToolbarItem.Identifier("com.lijingchiu.macropulse.navigation")
     static let reload = NSToolbarItem.Identifier("com.lijingchiu.macropulse.reload")
     static let update = NSToolbarItem.Identifier("com.lijingchiu.macropulse.update")
-    static let liveStatus = NSToolbarItem.Identifier("com.lijingchiu.macropulse.live-status")
-    static let openInBrowser = NSToolbarItem.Identifier("com.lijingchiu.macropulse.open-browser")
 }
 
 private enum CredentialStore {
@@ -84,6 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var updateTimer: Timer?
     private var updateCheckWasManual = false
     private var updateActionWasUserInitiated = false
+    private var updateInstallationStarted = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMainMenu()
@@ -115,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsMagnification = true
+        webView.allowsBackForwardNavigationGestures = true
         webView.underPageBackgroundColor = .clear
 
         window = NSWindow(
@@ -308,11 +308,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.navigation, .reload, .flexibleSpace, .update, .liveStatus, .openInBrowser]
+        [.navigation, .reload, .flexibleSpace, .update]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.navigation, .reload, .flexibleSpace, .update, .liveStatus, .openInBrowser]
+        [.navigation, .reload, .flexibleSpace, .update]
     }
 
     func toolbar(
@@ -377,70 +377,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             item.view = button
             return item
 
-        case .liveStatus:
-            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-            item.label = "Cloudflare Status"
-            item.paletteLabel = "Cloudflare Status"
-            item.view = makeLiveStatusView()
-            return item
-
-        case .openInBrowser:
-            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-            item.label = "Open in Browser"
-            item.paletteLabel = "Open in Browser"
-            item.toolTip = "Open Dashboard in Default Browser"
-            item.image = NSImage(systemSymbolName: "safari", accessibilityDescription: "Open in Browser")
-            item.target = self
-            item.action = #selector(openInBrowser(_:))
-            return item
-
         default:
             return nil
         }
-    }
-
-    private func makeLiveStatusLabel(frame: NSRect) -> NSTextField {
-        let label = NSTextField(labelWithString: "●  LIVE · CLOUDFLARE")
-        label.frame = frame
-        label.autoresizingMask = [.width, .height]
-        label.alignment = .center
-        label.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .semibold)
-
-        let value = NSMutableAttributedString(string: label.stringValue)
-        value.addAttribute(.foregroundColor, value: NSColor.systemGreen, range: NSRange(location: 0, length: 1))
-        value.addAttribute(
-            .foregroundColor,
-            value: NSColor.secondaryLabelColor,
-            range: NSRange(location: 1, length: value.length - 1)
-        )
-        label.attributedStringValue = value
-        return label
-    }
-
-    private func makeLiveStatusView() -> NSView {
-        let frame = NSRect(x: 0, y: 0, width: 142, height: 30)
-        let labelFrame = NSRect(x: 10, y: 0, width: 122, height: 30)
-
-        if #available(macOS 26.0, *) {
-            let content = NSView(frame: frame)
-            content.addSubview(makeLiveStatusLabel(frame: labelFrame))
-
-            let glass = NSGlassEffectView(frame: frame)
-            glass.contentView = content
-            glass.cornerRadius = 15
-            glass.tintColor = NSColor.systemGreen.withAlphaComponent(0.07)
-            return glass
-        }
-
-        let material = NSVisualEffectView(frame: frame)
-        material.material = .headerView
-        material.blendingMode = .withinWindow
-        material.state = .active
-        material.wantsLayer = true
-        material.layer?.cornerRadius = 15
-        material.layer?.masksToBounds = true
-        material.addSubview(makeLiveStatusLabel(frame: labelFrame))
-        return material
     }
 
     private func configureUpdateManager() {
@@ -463,8 +402,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             updateManager.downloadAvailableUpdate()
             updateMenuItem?.title = "Downloading \(update.version)…"
 
-        case let .downloaded(_, url):
-            NSWorkspace.shared.open(url)
+        case let .downloaded(update, url):
+            installDownloadedUpdate(update, at: url)
 
         case .checking, .downloading:
             break
@@ -524,28 +463,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 presentAvailableUpdate(update)
             }
 
-        case let .downloading(update):
+        case let .downloading(update, progress):
+            let percent = Int((progress * 100).rounded())
             setUpdateButton(
-                title: "Downloading…",
+                title: "Downloading \(percent)%",
                 symbol: "arrow.down.circle",
                 enabled: false,
                 toolTip: "Downloading Macro Pulse \(update.version)"
             )
-            updateMenuItem?.title = "Downloading Update \(update.version)…"
+            updateMenuItem?.title = "Downloading Update \(update.version) · \(percent)%"
 
         case let .downloaded(update, url):
-            setUpdateButton(
-                title: "Open \(update.version)",
-                symbol: "externaldrive.fill.badge.checkmark",
-                enabled: true,
-                toolTip: "Open the verified update DMG"
-            )
-            updateMenuItem?.title = "Open Downloaded Update \(update.version)…"
-
-            if updateActionWasUserInitiated {
-                updateActionWasUserInitiated = false
-                presentDownloadedUpdate(update, at: url)
-            }
+            installDownloadedUpdate(update, at: url)
 
         case let .failed(message):
             setUpdateButton(
@@ -582,7 +511,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private func presentAvailableUpdate(_ update: AppUpdate) {
         let alert = NSAlert()
         alert.messageText = "Macro Pulse \(update.version) is available"
-        alert.informativeText = "The update will be downloaded from the project's GitHub Release and verified with SHA-256 before it is saved."
+        alert.informativeText = "Macro Pulse will securely download and verify the update, close this version, replace the installed app, then reopen automatically."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Download Update")
         alert.addButton(withTitle: "Later")
@@ -595,19 +524,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
     }
 
-    private func presentDownloadedUpdate(_ update: AppUpdate, at url: URL) {
-        let alert = NSAlert()
-        alert.messageText = "Macro Pulse \(update.version) is ready"
-        alert.informativeText = "The DMG was downloaded to Downloads and passed SHA-256 verification. Open it, then drag Macro Pulse to Applications."
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "Open DMG")
-        alert.addButton(withTitle: "Show in Finder")
-        alert.beginSheetModal(for: window) { response in
-            if response == .alertFirstButtonReturn {
-                NSWorkspace.shared.open(url)
-            } else {
-                NSWorkspace.shared.activateFileViewerSelecting([url])
+    private func installDownloadedUpdate(_ update: AppUpdate, at dmgURL: URL) {
+        guard !updateInstallationStarted else {
+            return
+        }
+
+        updateInstallationStarted = true
+        updateActionWasUserInitiated = false
+        setUpdateButton(
+            title: "Installing…",
+            symbol: "arrow.triangle.2.circlepath",
+            enabled: false,
+            toolTip: "Installing Macro Pulse \(update.version)"
+        )
+        updateMenuItem?.title = "Installing Macro Pulse \(update.version)…"
+
+        do {
+            let helperURL = Bundle.main.bundleURL
+                .appendingPathComponent("Contents/Helpers/MacroPulseUpdater", isDirectory: false)
+            guard FileManager.default.isExecutableFile(atPath: helperURL.path) else {
+                throw NSError(
+                    domain: AppConfig.bundleIdentifier,
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "The automatic update helper is missing."]
+                )
             }
+
+            let runningBundle = Bundle.main.bundleURL.resolvingSymlinksInPath()
+            let destination: URL
+            if runningBundle.path.hasPrefix("/Volumes/") {
+                destination = URL(fileURLWithPath: "/Applications/Macro Pulse.app", isDirectory: true)
+            } else {
+                destination = runningBundle
+            }
+
+            let process = Process()
+            process.executableURL = helperURL
+            process.arguments = [
+                "--dmg", dmgURL.path,
+                "--destination", destination.path,
+                "--pid", String(ProcessInfo.processInfo.processIdentifier),
+            ]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                NSApp.terminate(nil)
+            }
+        } catch {
+            updateInstallationStarted = false
+            setUpdateButton(
+                title: "Retry Update",
+                symbol: "exclamationmark.arrow.triangle.2.circlepath",
+                enabled: true,
+                toolTip: error.localizedDescription
+            )
+            updateMenuItem?.title = "Check for Updates…"
+            presentMessage(
+                title: "Unable to start the update",
+                message: error.localizedDescription,
+                style: .warning
+            )
         }
     }
 
@@ -686,11 +664,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
           }
           style.textContent = \(stylesheet);
 
-          const updateLight = (event) => {
-            document.body.style.setProperty('--glass-x', event.clientX + 'px');
-            document.body.style.setProperty('--glass-y', event.clientY + 'px');
+          let pointerFrame = 0;
+          let pointerX = innerWidth / 2;
+          let pointerY = innerHeight / 3;
+          const paintLight = () => {
+            pointerFrame = 0;
+            document.body.style.setProperty('--glass-x', pointerX + 'px');
+            document.body.style.setProperty('--glass-y', pointerY + 'px');
           };
-          window.addEventListener('pointermove', updateLight, { passive: true });
+          window.addEventListener('pointermove', (event) => {
+            pointerX = event.clientX;
+            pointerY = event.clientY;
+            if (!pointerFrame) pointerFrame = requestAnimationFrame(paintLight);
+          }, { passive: true });
         })();
         """
     }

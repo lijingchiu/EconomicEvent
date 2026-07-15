@@ -784,6 +784,64 @@ html.native-macos-app .footer {
   }
 }
 
+
+/* Native shell interaction polish */
+.native-macos-app {
+  scroll-behavior: smooth;
+  scroll-padding-top: 88px;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+.native-macos-app body { overscroll-behavior-y: none; }
+.native-macos-app .page {
+  animation: native-page-enter 420ms cubic-bezier(.2, .8, .2, 1) both;
+}
+.native-macos-app button,
+.native-macos-app .control,
+.native-macos-app .filter-btn,
+.native-macos-app [role="button"] {
+  touch-action: manipulation;
+  transition: transform 140ms cubic-bezier(.2, .8, .2, 1), border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease, color 180ms ease;
+}
+.native-macos-app button:active,
+.native-macos-app .control:active,
+.native-macos-app .filter-btn:active,
+.native-macos-app [role="button"]:active { transform: scale(.975); }
+.native-macos-app :where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--native-accent) 78%, white);
+  outline-offset: 3px;
+}
+.native-macos-app .event {
+  backface-visibility: hidden;
+  transform: translate3d(0, 0, 0);
+  transition: transform 180ms cubic-bezier(.2, .8, .2, 1), border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+}
+.native-macos-app .event:hover { transform: translate3d(0, -2px, 0); }
+.native-macos-app .modal,
+.native-macos-app .dialog-backdrop,
+.native-macos-app [class*="modal-backdrop"] { animation: native-fade-in 180ms ease-out both; }
+.native-macos-app .modal-card,
+.native-macos-app .dialog,
+.native-macos-app [role="dialog"] { animation: native-dialog-enter 260ms cubic-bezier(.18, .86, .24, 1) both; }
+.native-macos-app ::-webkit-scrollbar { width: 10px; height: 10px; }
+.native-macos-app ::-webkit-scrollbar-thumb {
+  min-height: 40px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 28%, transparent);
+  background-clip: padding-box;
+}
+.native-macos-app ::-webkit-scrollbar-track { background: transparent; }
+@keyframes native-page-enter {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes native-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes native-dialog-enter {
+  from { opacity: 0; transform: translate3d(0, 10px, 0) scale(.985); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
 @media (prefers-reduced-transparency: reduce) {
   html.native-macos-app {
     --glass: #eef4fa;

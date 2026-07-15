@@ -5,6 +5,9 @@ export type EventExplanation = {
   chineseName: string;
   definition: string;
   marketImpact: string;
+  englishName: string;
+  definitionEn: string;
+  marketImpactEn: string;
 };
 
 type ExplanationRule = { pattern: RegExp; chineseName: string; definition: string };
@@ -32,6 +35,29 @@ const RULES: ExplanationRule[] = [
   { pattern: /speech|testimony|discussion/i, chineseName: "聯準會官員演說／聽證", definition: "官員對經濟與貨幣政策的公開發言或國會證詞，屬文字與語氣資訊，不是單一量化數據。" },
 ];
 
+const ENGLISH_RULES: Array<{ pattern: RegExp; englishName: string; definitionEn: string }> = [
+  { pattern: /core inflation rate mom|core cpi/i, englishName: "Core CPI MoM", definitionEn: "The monthly change in consumer prices excluding food and energy, used to track persistent underlying inflation." },
+  { pattern: /inflation rate mom|consumer price index/i, englishName: "Consumer Price Index MoM", definitionEn: "The monthly change in the prices consumers pay for a representative basket of goods and services." },
+  { pattern: /core inflation rate yoy/i, englishName: "Core CPI YoY", definitionEn: "The annual change in consumer prices excluding food and energy, used to track medium-term inflation pressure." },
+  { pattern: /inflation rate yoy/i, englishName: "Consumer Price Index YoY", definitionEn: "The annual change in consumer prices and one of the Federal Reserve's key inflation indicators." },
+  { pattern: /ppi/i, englishName: "Producer Price Index", definitionEn: "Measures changes in prices received by producers and can provide an early signal of consumer inflation pressure." },
+  { pattern: /non farm payrolls|nonfarm payrolls/i, englishName: "Nonfarm Payrolls", definitionEn: "Measures the change in U.S. employment outside farming and is a primary gauge of labor-market momentum." },
+  { pattern: /unemployment rate/i, englishName: "Unemployment Rate", definitionEn: "The share of the labor force that is unemployed, indicating how tight or weak the labor market is." },
+  { pattern: /ism manufacturing pmi/i, englishName: "ISM Manufacturing PMI", definitionEn: "A survey of manufacturing orders, production, employment and inventories. Above 50 generally indicates expansion." },
+  { pattern: /ism services pmi/i, englishName: "ISM Services PMI", definitionEn: "A survey of services activity, orders, employment and prices that tracks the direction of the services economy." },
+  { pattern: /michigan consumer sentiment|consumer sentiment/i, englishName: "Michigan Consumer Sentiment", definitionEn: "A household survey of personal finances, the economic outlook and willingness to spend." },
+  { pattern: /gdp growth|gross domestic product/i, englishName: "Gross Domestic Product", definitionEn: "Measures total U.S. economic output and its growth rate, the broadest gauge of economic activity." },
+  { pattern: /retail sales/i, englishName: "Retail Sales", definitionEn: "Measures changes in retail receipts and helps track household demand and consumption." },
+  { pattern: /building permits/i, englishName: "Building Permits", definitionEn: "Counts permits issued for new residential construction and is a forward-looking housing indicator." },
+  { pattern: /housing starts/i, englishName: "Housing Starts", definitionEn: "Counts residential construction projects that have begun, reflecting housing and building activity." },
+  { pattern: /crude oil inventories|petroleum status/i, englishName: "Crude Oil Inventories", definitionEn: "Measures changes in U.S. crude inventories. A build often signals ample supply or softer demand." },
+  { pattern: /natural gas storage/i, englishName: "Natural Gas Storage", definitionEn: "Measures changes in natural-gas inventories and the balance between energy supply and demand." },
+  { pattern: /federal funds|interest rate decision/i, englishName: "Federal Funds Rate Decision", definitionEn: "The Federal Reserve's decision on its policy-rate target range, directly affecting USD, rates and asset valuations." },
+  { pattern: /fomc minutes/i, englishName: "FOMC Minutes", definitionEn: "A detailed record of the FOMC discussion and policymakers' views on the economy and future rates." },
+  { pattern: /press conference/i, englishName: "Federal Reserve Press Conference", definitionEn: "The Chair's policy explanation and Q&A, closely watched for guidance on the future policy path." },
+  { pattern: /speech|testimony|discussion/i, englishName: "Federal Reserve Speech or Testimony", definitionEn: "Public policy communication whose wording and tone matter more than a single numerical result." },
+];
+
 function fallback(event: EconomicEvent): Pick<EventExplanation, "chineseName" | "definition"> {
   const names: Record<string, string> = { inflation: "通膨指標", employment: "就業指標", growth: "經濟成長指標", manufacturing: "製造業景氣指標", services: "服務業景氣指標", energy: "能源指標", housing: "房市指標", consumer: "消費指標", monetary_policy: "貨幣政策事件" };
   return { chineseName: names[event.category] ?? "美國經濟事件", definition: "官方排程中的美國經濟或貨幣政策事件，詳細定義依資料來源公告為準。" };
@@ -40,7 +66,8 @@ function fallback(event: EconomicEvent): Pick<EventExplanation, "chineseName" | 
 export function explainEvent(event: EconomicEvent): EventExplanation {
   const rule = RULES.find((item) => item.pattern.test(event.name));
   const base = rule ?? fallback(event);
-  if (isQualitativeEvent(event)) return { ...base, marketImpact: "此事件沒有可用的 Actual／Forecast 數值，不會自動標示利多或利空；請以官方文字內容與市場反應判讀。" };
+  const english = ENGLISH_RULES.find((item) => item.pattern.test(event.name)) ?? { englishName: event.name, definitionEn: "An official U.S. economic or monetary-policy event. Refer to the source release for its precise definition." };
+  if (isQualitativeEvent(event)) return { ...base, ...english, marketImpact: "此事件沒有可用的 Actual／Forecast 數值，不會自動標示利多或利空；請以官方文字內容與市場反應判讀。", marketImpactEn: "This is not a quantitative release with comparable Actual and Forecast values. Interpret the official wording, tone and market reaction." };
 
   const higher = /unemployment rate/i.test(event.name)
     ? "通常利空股市、原油與美元，利多黃金；失業率上升代表勞動市場轉弱。"
@@ -56,5 +83,19 @@ export function explainEvent(event: EconomicEvent): EventExplanation {
       : event.category === "inflation" || /federal funds|interest rate decision/i.test(event.name)
         ? "通常利多黃金與股市、利空美元；市場可能降低對高利率的預期。"
         : "通常利空股市與原油、利多黃金，並可能利空美元；市場會解讀為經濟動能較弱。";
-  return { ...base, marketImpact: `高於預期：${higher}\n低於預期：${lower}` };
+  const higherEn = /unemployment rate/i.test(event.name)
+    ? "Typically bearish for equities, oil and USD, and bullish for gold because a higher rate signals a weaker labor market."
+    : /crude oil inventories|petroleum status|natural gas storage/i.test(event.name)
+      ? "A larger inventory build usually signals ample supply or weaker demand and is typically bearish for energy prices."
+      : event.category === "inflation" || /federal funds|interest rate decision/i.test(event.name)
+        ? "Typically bearish for gold and equities and bullish for USD as markets may price a higher rate path."
+        : "Typically bullish for equities and oil, bearish for gold, and potentially bullish for USD as growth appears stronger.";
+  const lowerEn = /unemployment rate/i.test(event.name)
+    ? "Typically bullish for equities, oil and USD, and bearish for gold because a lower rate signals a stronger labor market."
+    : /crude oil inventories|petroleum status|natural gas storage/i.test(event.name)
+      ? "A smaller inventory build or draw usually signals tighter supply or stronger demand and is typically bullish for energy prices."
+      : event.category === "inflation" || /federal funds|interest rate decision/i.test(event.name)
+        ? "Typically bullish for gold and equities and bearish for USD as markets may price a lower rate path."
+        : "Typically bearish for equities and oil, bullish for gold, and potentially bearish for USD as growth appears weaker.";
+  return { ...base, ...english, marketImpact: `高於預期：${higher}\n低於預期：${lower}`, marketImpactEn: `Above expectations: ${higherEn}\nBelow expectations: ${lowerEn}` };
 }

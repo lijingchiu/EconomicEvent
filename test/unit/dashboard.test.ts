@@ -11,12 +11,18 @@ describe("admin dashboard assets", () => {
     expect(html).toContain('data-theme-choice="light"');
     expect(html).toContain('data-theme-choice="dark"');
     expect(html).toContain('data-theme-choice="system"');
+    expect(html).toContain('data-language="zh-Hant"');
+    expect(html).toContain('data-language="en"');
     expect(html).toContain("美國經濟事件");
     expect(html).toContain("--paper:#e7e5df");
     expect(html).toContain('data-view="list"');
     expect(html).toContain('data-view="calendar"');
     expect(html).toContain("data-calendar-event");
     expect(html).toContain("marketSignals");
+    expect(html).toContain('id="control-modal"');
+    expect(html).toContain('data-open-panel="settings"');
+    expect(html).toContain('class="mobile-dock"');
+    expect(html).toContain('id="operations-section"');
   });
 
   it("serves a cacheable SVG application icon", async () => {

@@ -12,6 +12,8 @@ describe("event explanations", () => {
     expect(result.marketImpact).toContain("高於預期");
     expect(result.marketImpact).toContain("低於預期");
     expect(result.marketImpact).toContain("利空黃金");
+    expect(result.englishName).toBe("Nonfarm Payrolls");
+    expect(result.marketImpactEn).toContain("Above expectations");
   });
 
   it("does not invent direction for qualitative events", () => {

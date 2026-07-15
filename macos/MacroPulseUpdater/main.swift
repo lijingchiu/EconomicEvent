@@ -180,7 +180,7 @@ private func replaceDirectly(stagedApp: URL, destination: URL) throws {
 
 private func showFailure(_ message: String) {
     let safe = appleScriptQuote(message)
-    try? run(
+    _ = try? run(
         "/usr/bin/osascript",
         ["-e", "display alert \"Macro Pulse update failed\" message \"\(safe)\" as critical"]
     )
@@ -204,7 +204,7 @@ do {
     var volume: URL?
     defer {
         if let volume {
-            try? run("/usr/bin/hdiutil", ["detach", volume.path, "-quiet"])
+            _ = try? run("/usr/bin/hdiutil", ["detach", volume.path, "-quiet"])
         }
     }
 
@@ -232,7 +232,7 @@ do {
 } catch {
     if let recoveryDestination,
        FileManager.default.fileExists(atPath: recoveryDestination.path) {
-        try? run("/usr/bin/open", ["-n", recoveryDestination.path])
+        _ = try? run("/usr/bin/open", ["-n", recoveryDestination.path])
     }
     let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     showFailure(message)

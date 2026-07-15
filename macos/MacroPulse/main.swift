@@ -211,6 +211,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             keyEquivalent: "q"
         ).target = NSApp
 
+        let editMenuItem = NSMenuItem()
+        mainMenu.addItem(editMenuItem)
+        let editMenu = NSMenu(title: "Edit")
+        editMenuItem.submenu = editMenu
+
+        let undoItem = editMenu.addItem(
+            withTitle: "Undo",
+            action: NSSelectorFromString("undo:"),
+            keyEquivalent: "z"
+        )
+        undoItem.target = nil
+
+        let redoItem = editMenu.addItem(
+            withTitle: "Redo",
+            action: NSSelectorFromString("redo:"),
+            keyEquivalent: "z"
+        )
+        redoItem.keyEquivalentModifierMask = [.command, .shift]
+        redoItem.target = nil
+
+        editMenu.addItem(.separator())
+
+        let cutItem = editMenu.addItem(
+            withTitle: "Cut",
+            action: NSSelectorFromString("cut:"),
+            keyEquivalent: "x"
+        )
+        cutItem.target = nil
+
+        let copyItem = editMenu.addItem(
+            withTitle: "Copy",
+            action: NSSelectorFromString("copy:"),
+            keyEquivalent: "c"
+        )
+        copyItem.target = nil
+
+        let pasteItem = editMenu.addItem(
+            withTitle: "Paste",
+            action: NSSelectorFromString("paste:"),
+            keyEquivalent: "v"
+        )
+        pasteItem.target = nil
+
+        let selectAllItem = editMenu.addItem(
+            withTitle: "Select All",
+            action: NSSelectorFromString("selectAll:"),
+            keyEquivalent: "a"
+        )
+        selectAllItem.target = nil
+
         let navigationMenuItem = NSMenuItem()
         mainMenu.addItem(navigationMenuItem)
         let navigationMenu = NSMenu(title: "Navigate")

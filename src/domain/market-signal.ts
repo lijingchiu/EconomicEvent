@@ -13,13 +13,20 @@ const LABELS: Record<MarketSignal["market"], string> = {
   USD: "美元",
 };
 
-function numericValue(value: string | null | undefined): number | null {
+export function numericValue(value: string | null | undefined): number | null {
   if (!value) return null;
   const normalized = value.replace(/,/g, "").trim();
   const match = /^([-+]?\d+(?:\.\d+)?)\s*([KMBT])?%?$/i.exec(normalized);
   if (!match) return null;
   const scale = ({ K: 1e3, M: 1e6, B: 1e9, T: 1e12 } as const)[match[2]?.toUpperCase() as "K" | "M" | "B" | "T"] ?? 1;
   return Number(match[1]) * scale;
+}
+
+export function compareToForecast(event: Pick<EconomicEvent, "actualValue" | "forecastValue">): "higher" | "lower" | "equal" | "unknown" {
+  const actual = numericValue(event.actualValue);
+  const forecast = numericValue(event.forecastValue);
+  if (actual == null || forecast == null) return "unknown";
+  return actual === forecast ? "equal" : actual > forecast ? "higher" : "lower";
 }
 
 export function isQualitativeEvent(event: Pick<EconomicEvent, "name">): boolean {

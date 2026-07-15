@@ -2,6 +2,7 @@ import type { AppConfig } from "../types";
 import type { EconomicEvent } from "../types";
 import { reminderSchedule } from "../domain/reminder";
 import { buildMarketSignals } from "../domain/market-signal";
+import { explainEvent } from "../domain/event-explanation";
 
 export type EventFilter = { fromUtc: string; toUtc: string; provider?: string; category?: string; impact?: string; limit?: number };
 
@@ -48,6 +49,9 @@ export async function listEvents(db: D1Database, filter: EventFilter): Promise<R
   return result.results.map((row) => ({
     ...row,
     marketSignals: buildMarketSignals({
+      id: String(row.id), provider: row.provider as EconomicEvent["provider"], sourceUrl: String(row.sourceUrl), name: String(row.name), normalizedName: String(row.normalizedName), category: row.category as EconomicEvent["category"], country: "US", currency: "USD", eventTimeUtc: String(row.eventTimeUtc), localDisplayTimezone: String(row.localDisplayTimezone), impact: row.impact as EconomicEvent["impact"], affectedMarkets: JSON.parse(String(row.affectedMarketsJson)) as EconomicEvent["affectedMarkets"], description: row.description ? String(row.description) : null, actualValue: row.actualValue ? String(row.actualValue) : null, forecastValue: row.forecastValue ? String(row.forecastValue) : null, previousValue: row.previousValue ? String(row.previousValue) : null, valueUnit: row.valueUnit ? String(row.valueUnit) : null, valueSourceUrl: row.valueSourceUrl ? String(row.valueSourceUrl) : null, sourceUpdatedAt: row.sourceUpdatedAt ? String(row.sourceUpdatedAt) : null, rawHash: String(row.rawHash),
+    }),
+    eventExplanation: explainEvent({
       id: String(row.id), provider: row.provider as EconomicEvent["provider"], sourceUrl: String(row.sourceUrl), name: String(row.name), normalizedName: String(row.normalizedName), category: row.category as EconomicEvent["category"], country: "US", currency: "USD", eventTimeUtc: String(row.eventTimeUtc), localDisplayTimezone: String(row.localDisplayTimezone), impact: row.impact as EconomicEvent["impact"], affectedMarkets: JSON.parse(String(row.affectedMarketsJson)) as EconomicEvent["affectedMarkets"], description: row.description ? String(row.description) : null, actualValue: row.actualValue ? String(row.actualValue) : null, forecastValue: row.forecastValue ? String(row.forecastValue) : null, previousValue: row.previousValue ? String(row.previousValue) : null, valueUnit: row.valueUnit ? String(row.valueUnit) : null, valueSourceUrl: row.valueSourceUrl ? String(row.valueSourceUrl) : null, sourceUpdatedAt: row.sourceUpdatedAt ? String(row.sourceUpdatedAt) : null, rawHash: String(row.rawHash),
     }),
   }));

@@ -26,9 +26,9 @@ xcodebuild -version
 
 APP_SOURCES=("${PROJECT_ROOT}/macos/MacroPulse/"*.swift)
 for architecture in arm64 x86_64; do
-  xcrun swiftc     -O     -target "${architecture}-apple-macos13.0"     -sdk "${SDK_PATH}"     "${APP_SOURCES[@]}"     -framework Cocoa     -framework WebKit     -framework Security     -framework CryptoKit     -o "${BUILD_ROOT}/${EXECUTABLE_NAME}-${architecture}"
+  xcrun swiftc     -O     -warnings-as-errors     -target "${architecture}-apple-macos13.0"     -sdk "${SDK_PATH}"     "${APP_SOURCES[@]}"     -framework Cocoa     -framework WebKit     -framework Security     -framework CryptoKit     -o "${BUILD_ROOT}/${EXECUTABLE_NAME}-${architecture}"
 
-  xcrun swiftc     -O     -parse-as-library     -application-extension     -target "${architecture}-apple-macos13.0"     -sdk "${SDK_PATH}"     "${PROJECT_ROOT}/macos/MacroPulseWidget/MacroPulseWidget.swift"     -framework Foundation     -framework SwiftUI     -framework WidgetKit     -o "${BUILD_ROOT}/${WIDGET_NAME}-${architecture}"
+  xcrun swiftc     -O     -warnings-as-errors     -parse-as-library     -application-extension     -target "${architecture}-apple-macos13.0"     -sdk "${SDK_PATH}"     "${PROJECT_ROOT}/macos/MacroPulseWidget/MacroPulseWidget.swift"     -framework Foundation     -framework SwiftUI     -framework WidgetKit     -o "${BUILD_ROOT}/${WIDGET_NAME}-${architecture}"
 done
 
 lipo -create   "${BUILD_ROOT}/${EXECUTABLE_NAME}-arm64"   "${BUILD_ROOT}/${EXECUTABLE_NAME}-x86_64"   -output "${CONTENTS}/MacOS/${EXECUTABLE_NAME}"

@@ -49,7 +49,7 @@ final class UpdateManager {
         var request = URLRequest(url: releasesURL)
         request.timeoutInterval = 20
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.setValue("MacroPulse-macOS/(currentVersion)", forHTTPHeaderField: "User-Agent")
+        request.setValue("MacroPulse-macOS/\(currentVersion)", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
 
@@ -106,7 +106,7 @@ final class UpdateManager {
         var request = URLRequest(url: update.downloadURL)
         request.timeoutInterval = 120
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.setValue("MacroPulse-macOS/(currentVersion)", forHTTPHeaderField: "User-Agent")
+        request.setValue("MacroPulse-macOS/\(currentVersion)", forHTTPHeaderField: "User-Agent")
         request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
 
         let task = URLSession.shared.downloadTask(with: request) { [weak self] temporaryURL, response, error in
@@ -235,7 +235,7 @@ final class UpdateManager {
 
         let safeVersion = version.filter { $0.isNumber || $0 == "." || $0 == "-" }
         let destination = downloadsDirectory
-            .appendingPathComponent("MacroPulse-(safeVersion).dmg", isDirectory: false)
+            .appendingPathComponent("MacroPulse-\(safeVersion).dmg", isDirectory: false)
 
         if fileManager.fileExists(atPath: destination.path) {
             try fileManager.removeItem(at: destination)
@@ -282,7 +282,7 @@ private enum UpdateError: LocalizedError {
         case .invalidResponse:
             return "The update server returned an invalid response."
         case let .httpStatus(status):
-            return "The update server returned HTTP (status)."
+            return "The update server returned HTTP \(status)."
         case .missingDigest:
             return "The update could not be verified because its SHA-256 digest is missing."
         case .checksumMismatch:

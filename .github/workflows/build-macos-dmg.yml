@@ -1,0 +1,44 @@
+name: Build Macro Pulse macOS DMG
+
+on:
+  push:
+    branches:
+      - agent/macos-app-dmg
+    paths:
+      - ".github/workflows/build-macos-dmg.yml"
+      - "macos/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build universal macOS app
+    runs-on: macos-14
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build and package DMG
+        run: bash macos/build-dmg.sh
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MacroPulse-macOS-Universal
+          path: |
+            dist/MacroPulse-macOS-Universal.dmg
+            dist/MacroPulse-macOS-Universal.dmg.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Publish prerelease download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="macos-build-${GITHUB_RUN_NUMBER}"
+          gh release create "${TAG}"             dist/MacroPulse-macOS-Universal.dmg             dist/MacroPulse-macOS-Universal.dmg.sha256             --target "${GITHUB_SHA}"             --prerelease             --title "Macro Pulse macOS Build ${GITHUB_RUN_NUMBER}"             --notes "Universal macOS 13+ build for Apple Silicon and Intel. This build uses ad-hoc signing and is not Apple-notarized."

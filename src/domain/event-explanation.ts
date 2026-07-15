@@ -1,5 +1,5 @@
 import type { EconomicEvent } from "../types";
-import { buildMarketSignals, compareToForecast, isQualitativeEvent } from "./market-signal";
+import { isQualitativeEvent } from "./market-signal";
 
 export type EventExplanation = {
   chineseName: string;
@@ -42,10 +42,19 @@ export function explainEvent(event: EconomicEvent): EventExplanation {
   const base = rule ?? fallback(event);
   if (isQualitativeEvent(event)) return { ...base, marketImpact: "此事件沒有可用的 Actual／Forecast 數值，不會自動標示利多或利空；請以官方文字內容與市場反應判讀。" };
 
-  const comparison = compareToForecast(event);
-  if (comparison === "unknown") return { ...base, marketImpact: "目前缺少可比較的 Forecast，僅憑 Actual 無法可靠判斷對黃金、原油或股市的利多／利空方向。" };
-  if (comparison === "equal") return { ...base, marketImpact: "Actual 與 Forecast 相同，通常代表數據大致符合預期，沒有明確的數據驚喜方向。" };
-  const signals = buildMarketSignals(event).map((signal) => signal.label);
-  const comparisonText = comparison === "higher" ? "高於預期" : "低於預期";
-  return { ...base, marketImpact: `${comparisonText}。${signals.length ? `依目前規則：${signals.join("、")}；若數據低於預期，方向通常相反。` : "但目前事件的受影響市場沒有足夠規則可做方向標示。"}` };
+  const higher = /unemployment rate/i.test(event.name)
+    ? "通常利空股市、原油與美元，利多黃金；失業率上升代表勞動市場轉弱。"
+    : /crude oil inventories|petroleum status|natural gas storage/i.test(event.name)
+      ? "庫存高於預期通常代表供給較充裕或需求較弱，原油／能源價格偏利空。"
+      : event.category === "inflation" || /federal funds|interest rate decision/i.test(event.name)
+        ? "通常利空黃金與股市、利多美元；市場可能提高對高利率的預期。"
+        : "通常利多股市與原油、利空黃金，並可能利多美元；市場會解讀為經濟動能較強。";
+  const lower = /unemployment rate/i.test(event.name)
+    ? "通常利多股市、原油與美元，利空黃金；失業率下降代表勞動市場轉強。"
+    : /crude oil inventories|petroleum status|natural gas storage/i.test(event.name)
+      ? "庫存低於預期通常代表供給較緊或需求較強，原油／能源價格偏利多。"
+      : event.category === "inflation" || /federal funds|interest rate decision/i.test(event.name)
+        ? "通常利多黃金與股市、利空美元；市場可能降低對高利率的預期。"
+        : "通常利空股市與原油、利多黃金，並可能利空美元；市場會解讀為經濟動能較弱。";
+  return { ...base, marketImpact: `高於預期：${higher}\n低於預期：${lower}` };
 }

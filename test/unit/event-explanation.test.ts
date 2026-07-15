@@ -6,15 +6,16 @@ const base: EconomicEvent = { id: "x", provider: "bls", sourceUrl: "https://exam
 
 describe("event explanations", () => {
   it("explains a quantitative event and its surprise direction", () => {
-    const result = explainEvent({ ...base, actualValue: "250", forecastValue: "180" });
+    const result = explainEvent({ ...base });
     expect(result.chineseName).toContain("非農");
     expect(result.definition).toContain("就業");
     expect(result.marketImpact).toContain("高於預期");
+    expect(result.marketImpact).toContain("低於預期");
     expect(result.marketImpact).toContain("利空黃金");
   });
 
   it("does not invent direction for qualitative events", () => {
-    const result = explainEvent({ ...base, name: "Fed Chair Warsh Testimony", category: "monetary_policy", actualValue: "1", forecastValue: "0" });
+    const result = explainEvent({ ...base, name: "Fed Chair Warsh Testimony", category: "monetary_policy" });
     expect(result.chineseName).toContain("演說");
     expect(result.marketImpact).toContain("不會自動標示利多或利空");
   });

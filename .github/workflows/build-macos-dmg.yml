@@ -21,7 +21,7 @@ permissions:
 jobs:
   build-macos:
     name: Build universal macOS app
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 20
 
     steps:
@@ -52,5 +52,5 @@ jobs:
           dist/MacroPulse-macOS-Universal.dmg.sha256
           --target "${GITHUB_SHA}"
           --prerelease
-          --title "Macro Pulse macOS Build ${GITHUB_RUN_NUMBER}"
-          --notes "Universal macOS 13+ build for Apple Silicon and Intel. This build uses ad-hoc signing and is not Apple-notarized."
+          --title "Macro Pulse Liquid Glass macOS Build ${GITHUB_RUN_NUMBER}"
+          --notes "Version 1.1.0 with native macOS 26 Liquid Glass controls, a responsive app-only glass interface, Keychain credential storage, and universal Apple Silicon and Intel support. This build uses ad-hoc signing and is not Apple-notarized."

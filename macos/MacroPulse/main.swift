@@ -108,8 +108,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         webView.uiDelegate = self
         webView.allowsMagnification = true
         webView.underPageBackgroundColor = .clear
-        webView.scrollView.scrollerStyle = .overlay
-        webView.scrollView.drawsBackground = false
 
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1320, height: 880),

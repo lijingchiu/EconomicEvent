@@ -12,6 +12,8 @@ describe("admin dashboard assets", () => {
     expect(html).toContain('data-theme-choice="dark"');
     expect(html).toContain('data-theme-choice="system"');
     expect(html).toContain("美國經濟事件");
+    expect(html).toContain("repeating-linear-gradient");
+    expect(html).toContain("--paper:#d7c39e");
   });
 
   it("serves a cacheable SVG application icon", async () => {

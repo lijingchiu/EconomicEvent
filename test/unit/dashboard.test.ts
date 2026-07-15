@@ -13,6 +13,10 @@ describe("admin dashboard assets", () => {
     expect(html).toContain('data-theme-choice="system"');
     expect(html).toContain("美國經濟事件");
     expect(html).toContain("--paper:#e7e5df");
+    expect(html).toContain('data-view="list"');
+    expect(html).toContain('data-view="calendar"');
+    expect(html).toContain("data-calendar-event");
+    expect(html).toContain("marketSignals");
   });
 
   it("serves a cacheable SVG application icon", async () => {

@@ -1,6 +1,7 @@
 import type { AppConfig } from "../types";
 import type { EconomicEvent } from "../types";
 import { reminderSchedule } from "../domain/reminder";
+import { buildMarketSignals } from "../domain/market-signal";
 
 export type EventFilter = { fromUtc: string; toUtc: string; provider?: string; category?: string; impact?: string; limit?: number };
 
@@ -44,7 +45,12 @@ export async function listEvents(db: D1Database, filter: EventFilter): Promise<R
   if (filter.impact) { conditions.push("impact = ?"); values.push(filter.impact); }
   const limit = Math.min(Math.max(filter.limit ?? 30, 1), 200);
   const result = await db.prepare(`SELECT id, provider, provider_event_id AS providerEventId, source_url AS sourceUrl, name, normalized_name AS normalizedName, category, country, currency, event_time_utc AS eventTimeUtc, local_display_timezone AS localDisplayTimezone, impact, affected_markets_json AS affectedMarketsJson, description, actual_value AS actualValue, forecast_value AS forecastValue, previous_value AS previousValue, value_unit AS valueUnit, value_source_url AS valueSourceUrl, source_updated_at AS sourceUpdatedAt, raw_hash AS rawHash, created_at AS createdAt, updated_at AS updatedAt FROM economic_events WHERE ${conditions.join(" AND ")} ORDER BY event_time_utc ASC LIMIT ?`).bind(...values, limit).all<Record<string, unknown>>();
-  return result.results;
+  return result.results.map((row) => ({
+    ...row,
+    marketSignals: buildMarketSignals({
+      id: String(row.id), provider: row.provider as EconomicEvent["provider"], sourceUrl: String(row.sourceUrl), name: String(row.name), normalizedName: String(row.normalizedName), category: row.category as EconomicEvent["category"], country: "US", currency: "USD", eventTimeUtc: String(row.eventTimeUtc), localDisplayTimezone: String(row.localDisplayTimezone), impact: row.impact as EconomicEvent["impact"], affectedMarkets: JSON.parse(String(row.affectedMarketsJson)) as EconomicEvent["affectedMarkets"], description: row.description ? String(row.description) : null, actualValue: row.actualValue ? String(row.actualValue) : null, forecastValue: row.forecastValue ? String(row.forecastValue) : null, previousValue: row.previousValue ? String(row.previousValue) : null, valueUnit: row.valueUnit ? String(row.valueUnit) : null, valueSourceUrl: row.valueSourceUrl ? String(row.valueSourceUrl) : null, sourceUpdatedAt: row.sourceUpdatedAt ? String(row.sourceUpdatedAt) : null, rawHash: String(row.rawHash),
+    }),
+  }));
 }
 
 export async function getEvent(db: D1Database, id: string): Promise<EconomicEvent | null> {
@@ -80,7 +86,14 @@ export async function setOfficialEventValues(db: D1Database, id: string, update:
     now,
     id,
   ).run();
-  return Number(result.meta.changes ?? 0) > 0;
+  const updated = Number(result.meta.changes ?? 0) > 0;
+  if (updated) {
+    // -1 is reserved for the one-time post-release result notification.
+    await db.prepare(`INSERT INTO notification_deliveries (event_id, reminder_minutes, scheduled_for_utc, status, attempts, created_at, updated_at)
+      VALUES (?, -1, ?, 'pending', 0, ?, ?)
+      ON CONFLICT(event_id, reminder_minutes) DO NOTHING`).bind(id, now, now, now).run();
+  }
+  return updated;
 }
 
 export async function upcomingCount(db: D1Database, now: string): Promise<number> { const result = await db.prepare("SELECT COUNT(*) AS count FROM economic_events WHERE event_time_utc > ?").bind(now).first<{ count: number }>(); return Number(result?.count ?? 0); }

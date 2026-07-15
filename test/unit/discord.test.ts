@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildEventPayload, DiscordWebhookClient } from "../../src/providers/discord";
+import { buildEventPayload, buildEventResultPayload, DiscordWebhookClient } from "../../src/providers/discord";
 import type { EconomicEvent } from "../../src/types";
 
 const event: EconomicEvent = { id: "bls_1", provider: "bls", providerEventId: "x", sourceUrl: "https://www.bls.gov/schedule/2026/", name: "Consumer Price Index for June 2026", normalizedName: "consumer price index", category: "inflation", country: "US", currency: "USD", eventTimeUtc: "2026-07-14T12:30:00.000Z", localDisplayTimezone: "Asia/Taipei", impact: "high", affectedMarkets: ["NQ", "GOLD", "USD", "RATES"], rawHash: "hash" };
@@ -17,6 +17,21 @@ describe("Discord webhook", () => {
     expect(everyone.allowed_mentions).toEqual({ parse: ["everyone"] });
     const unknown = buildEventPayload(event, 5, { DB: {} as D1Database, DISCORD_MENTION: "@unknown" });
     expect(unknown.allowed_mentions).toEqual({ parse: [] });
+  });
+
+  it("includes stored values and conservative market direction labels", () => {
+    const payload = buildEventPayload({ ...event, name: "Non Farm Payrolls", category: "employment", actualValue: "250K", forecastValue: "180K", previousValue: "165K" }, 5, { DB: {} as D1Database });
+    const fields = payload.embeds[0].fields;
+    expect(fields.find((field) => field.name === "Actual")?.value).toBe("250K");
+    expect(fields.find((field) => field.name === "Forecast")?.value).toBe("180K");
+    expect(fields.find((field) => field.name === "Prior")?.value).toBe("165K");
+    expect(fields.find((field) => field.name === "市場方向")?.value).toContain("利空黃金");
+  });
+
+  it("builds a separate post-release result webhook", () => {
+    const payload = buildEventResultPayload({ ...event, actualValue: "0.2", previousValue: "0.1", valueUnit: "%" }, { DB: {} as D1Database });
+    expect(payload.embeds[0].title).toContain("數據公布");
+    expect(payload.embeds[0].fields.find((field) => field.name === "Actual")?.value).toBe("0.2 %");
   });
 
   it("accepts 200, 204 and retries 500/429", async () => {

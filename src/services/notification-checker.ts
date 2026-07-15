@@ -16,7 +16,9 @@ export async function checkDueNotifications(env: Env, now = new Date().toISOStri
   for (const delivery of due) {
     if (!await claimDelivery(env.DB, delivery.id, now)) continue;
     try {
-      const response = await client.sendEventReminder(delivery.event, delivery.reminderMinutes);
+      const response = delivery.reminderMinutes === -1
+        ? await client.sendEventResult(delivery.event)
+        : await client.sendEventReminder(delivery.event, delivery.reminderMinutes);
       await markSent(env.DB, delivery.id, new Date().toISOString(), response.messageId);
       sent += 1;
       log("info", "notification_sent", { deliveryId: delivery.id, eventId: delivery.event.id, reminderMinutes: delivery.reminderMinutes }, env);

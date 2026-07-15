@@ -622,6 +622,7 @@ html.native-macos-app .login-backdrop {
 }
 
 html.native-macos-app .login-card {
+  position: relative;
   overflow: hidden;
   width: min(500px, 100%);
   padding: 40px;

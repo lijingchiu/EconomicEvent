@@ -156,6 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         window.setFrameAutosaveName("MacroPulseMainWindow")
         window.center()
         window.makeKeyAndOrderFront(nil)
+        registerWidgetExtension()
 
         loadDashboard()
         notificationManager.start()
@@ -202,6 +203,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         window.makeKeyAndOrderFront(nil)
         loadDashboard()
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func registerWidgetExtension() {
+        let widgetURL = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/PlugIns/MacroPulseWidget.appex", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: widgetURL.path) else { return }
+
+        DispatchQueue.global(qos: .utility).async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/pluginkit")
+            process.arguments = ["-a", widgetURL.path]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            do {
+                try process.run()
+                process.waitUntilExit()
+            } catch {
+                return
+            }
+        }
     }
 
     private func installMainMenu() {

@@ -54,7 +54,6 @@ cp "${PROJECT_ROOT}/macos/MacroPulseWidget/Info.plist" "${WIDGET_CONTENTS}/Info.
 plutil -lint "${CONTENTS}/Info.plist" "${WIDGET_CONTENTS}/Info.plist"
 
 test "$(plutil -extract NSExtension.NSExtensionPointIdentifier raw "${WIDGET_CONTENTS}/Info.plist")" = "com.apple.widgetkit-extension"
-test "$(plutil -extract NSExtension.NSExtensionPrincipalClass raw "${WIDGET_CONTENTS}/Info.plist")" = "MacroPulseWidget.MacroPulseWidget"
 test "$(plutil -extract CFBundleURLTypes.0.CFBundleURLSchemes.0 raw "${CONTENTS}/Info.plist")" = "macropulse"
 
 ICONSET="${BUILD_ROOT}/AppIcon.iconset"

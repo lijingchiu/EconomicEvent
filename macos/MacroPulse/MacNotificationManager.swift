@@ -12,6 +12,11 @@ final class MacNotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     private struct Overview: Decodable {
         let events: [ReleaseEvent]
+        let settings: AppSettings?
+    }
+
+    private struct AppSettings: Decodable {
+        let reminderMinutes: [Int]?
     }
 
     private struct ReleaseEvent: Decodable {
@@ -24,11 +29,16 @@ final class MacNotificationManager: NSObject, UNUserNotificationCenterDelegate {
         let previousValue: String?
         let valueUnit: String?
         let sourceUpdatedAt: String?
+        let impact: String?
+        let category: String?
+        let localDisplayTimezone: String?
+        let affectedMarketsJson: String?
     }
 
     private let center = UNUserNotificationCenter.current()
     private let enabledKey = "macNotificationsEnabled"
     private let deliveredKey = "macNotificationDeliveredResults"
+    private let reminderDeliveredKey = "macNotificationDeliveredReminders"
     private let overviewURL = URL(
         string: "https://us-economic-event-alerts.jim1999110724660600.workers.dev/admin/overview"
     )!
@@ -195,7 +205,8 @@ final class MacNotificationManager: NSObject, UNUserNotificationCenterDelegate {
                     return
                 }
 
-                let nextInterval = self.process(overview.events)
+                let reminderMinutes = overview.settings?.reminderMinutes ?? [60, 30, 15, 5]
+                let nextInterval = self.process(overview.events, reminderMinutes: reminderMinutes)
                 self.schedulePoll(after: nextInterval)
             }
         }
@@ -203,36 +214,62 @@ final class MacNotificationManager: NSObject, UNUserNotificationCenterDelegate {
         task.resume()
     }
 
-    private func process(_ events: [ReleaseEvent]) -> TimeInterval {
+    private func process(_ events: [ReleaseEvent], reminderMinutes: [Int]) -> TimeInterval {
         let now = Date()
         var isNearUnresolvedRelease = false
+        let reminders = reminderMinutes.filter { $0 > 0 }.sorted(by: >)
 
         for event in events {
-            guard let releaseDate = ISO8601DateFormatter().date(from: event.eventTimeUtc) else {
+            guard let releaseDate = ISO8601DateFormatter().date(from: event.eventTimeUtc) else { continue }
+            let secondsUntilRelease = releaseDate.timeIntervalSince(now)
+            let actual = event.actualValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+            if actual.isEmpty {
+                if abs(secondsUntilRelease) <= 15 * 60 { isNearUnresolvedRelease = true }
+                for minutes in reminders {
+                    let threshold = TimeInterval(minutes * 60)
+                    guard secondsUntilRelease >= max(0, threshold - 90),
+                          secondsUntilRelease <= threshold + 90 else { continue }
+                    notifyReminder(event, minutesBeforeRelease: minutes, releaseDate: releaseDate)
+                }
                 continue
             }
 
             let secondsFromRelease = now.timeIntervalSince(releaseDate)
-            let actual = event.actualValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-            if actual.isEmpty, abs(secondsFromRelease) <= 15 * 60 {
-                isNearUnresolvedRelease = true
-                continue
-            }
-
-            guard !actual.isEmpty,
-                  secondsFromRelease >= -5 * 60,
-                  secondsFromRelease <= 60 * 60
-            else {
-                continue
-            }
-            notifyResult(event, actual: actual)
+            guard secondsFromRelease >= -5 * 60, secondsFromRelease <= 60 * 60 else { continue }
+            notifyResult(event, actual: actual, releaseDate: releaseDate)
         }
-
         return isNearUnresolvedRelease ? 5 : 60
     }
 
-    private func notifyResult(_ event: ReleaseEvent, actual: String) {
+    private func notifyReminder(_ event: ReleaseEvent, minutesBeforeRelease: Int, releaseDate: Date) {
+        let key = [event.id, event.eventTimeUtc, String(minutesBeforeRelease)].joined(separator: "|")
+        let delivered = Set(UserDefaults.standard.stringArray(forKey: reminderDeliveredKey) ?? [])
+        guard !delivered.contains(key), !pendingKeys.contains(key) else { return }
+        pendingKeys.insert(key)
+
+        let content = UNMutableNotificationContent()
+        content.title = event.name
+        content.subtitle = "(event.provider.uppercased()) · 提前 (minutesBeforeRelease) 分鐘提醒"
+        content.body = notificationDetails(event, releaseDate: releaseDate, prefix: "距離公布約 (minutesBeforeRelease) 分鐘")
+        content.sound = .default
+        content.threadIdentifier = "economic-release-reminders"
+        content.userInfo = ["eventID": event.id, "reminderMinutes": minutesBeforeRelease]
+
+        let request = UNNotificationRequest(identifier: "reminder-(UUID().uuidString)", content: content, trigger: nil)
+        center.add(request) { [weak self] error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.pendingKeys.remove(key)
+                guard error == nil else { return }
+                var stored = Set(UserDefaults.standard.stringArray(forKey: self.reminderDeliveredKey) ?? [])
+                stored.insert(key)
+                UserDefaults.standard.set(Array(stored.suffix(250)), forKey: self.reminderDeliveredKey)
+            }
+        }
+    }
+
+    private func notifyResult(_ event: ReleaseEvent, actual: String, releaseDate: Date) {
         let key = [
             event.id,
             actual,
@@ -254,7 +291,7 @@ final class MacNotificationManager: NSObject, UNUserNotificationCenterDelegate {
         content.body = "Actual 當期 \(actualText)  ·  Forecast 預期 \(forecastText)  ·  Prior 前值 \(priorText)"
         content.sound = .default
         content.threadIdentifier = "economic-release-results"
-        content.userInfo = ["eventID": event.id]
+        content.userInfo = ["eventID": event.id, "actual": actual]
 
         let request = UNNotificationRequest(
             identifier: "release-\(UUID().uuidString)",
@@ -275,6 +312,36 @@ final class MacNotificationManager: NSObject, UNUserNotificationCenterDelegate {
                 UserDefaults.standard.set(Array(stored.suffix(250)), forKey: self.deliveredKey)
             }
         }
+    }
+
+    private func notificationDetails(_ event: ReleaseEvent, releaseDate: Date, prefix: String) -> String {
+        let timezone = TimeZone(identifier: event.localDisplayTimezone ?? "") ?? .current
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM/dd HH:mm"
+        formatter.timeZone = timezone
+        let releaseText = formatter.string(from: releaseDate)
+        let category = event.category?.isEmpty == false ? event.category! : "經濟數據"
+        let impact = event.impact?.isEmpty == false ? event.impact! : "—"
+        return "(prefix)
+公布時間 (releaseText)
+分類 (category) · 影響 (impact)
+可能影響 (marketLabels(from: event.affectedMarketsJson))"
+    }
+
+    private func marketLabels(from json: String?) -> String {
+        guard let json, let data = json.data(using: .utf8),
+              let markets = try? JSONSerialization.jsonObject(with: data) as? [String] else { return "—" }
+        let labels = markets.map { market in
+            switch market.uppercased() {
+            case "GOLD": return "黃金"
+            case "CRUDE_OIL", "OIL": return "原油"
+            case "USD", "DXY": return "美元"
+            case "NQ", "SPX", "STOCKS": return "股市"
+            case "RATES": return "利率"
+            default: return market
+            }
+        }
+        return labels.isEmpty ? "—" : labels.joined(separator: "、")
     }
 
     private func formatted(_ value: String?, unit: String?) -> String {

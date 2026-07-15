@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dashboardRoute, faviconRoute } from "../../src/ui/admin-dashboard";
+import { dashboardRoute, faviconRoute, paperTextureRoute } from "../../src/ui/admin-dashboard";
 
 describe("admin dashboard assets", () => {
   it("serves the editorial dashboard with all three display modes", async () => {
@@ -12,8 +12,8 @@ describe("admin dashboard assets", () => {
     expect(html).toContain('data-theme-choice="dark"');
     expect(html).toContain('data-theme-choice="system"');
     expect(html).toContain("美國經濟事件");
-    expect(html).toContain("repeating-linear-gradient");
-    expect(html).toContain("--paper:#d7c39e");
+    expect(html).toContain("/paper-texture.svg");
+    expect(html).toContain("--paper:#eee1cb");
   });
 
   it("serves a cacheable SVG application icon", async () => {
@@ -23,5 +23,14 @@ describe("admin dashboard assets", () => {
     expect(response.headers.get("content-type")).toContain("image/svg+xml");
     expect(response.headers.get("cache-control")).toContain("immutable");
     expect(svg).toContain("<svg");
+  });
+
+  it("serves a cacheable handmade paper texture", async () => {
+    const response = paperTextureRoute();
+    const svg = await response.text();
+
+    expect(response.headers.get("content-type")).toContain("image/svg+xml");
+    expect(svg).toContain("feTurbulence");
+    expect(svg).toContain('stroke="#b86f61"');
   });
 });

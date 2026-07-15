@@ -6,6 +6,7 @@ private enum AppConfig {
     static let name = "Macro Pulse"
     static let bundleIdentifier = "com.lijingchiu.macropulse"
     static let credentialMessageName = "credentialStore"
+    static let notificationMessageName = "nativeNotifications"
     static let adminURL = URL(string: "https://us-economic-event-alerts.jim1999110724660600.workers.dev/admin")!
 }
 
@@ -79,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private weak var updateButton: NSButton!
     private var updateMenuItem: NSMenuItem?
     private let updateManager = UpdateManager()
+    private let notificationManager = MacNotificationManager()
     private var updateTimer: Timer?
     private var updateCheckWasManual = false
     private var updateActionWasUserInitiated = false
@@ -87,13 +89,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMainMenu()
         configureUpdateManager()
+        configureMacNotifications()
 
         let userContentController = WKUserContentController()
         userContentController.add(self, name: AppConfig.credentialMessageName)
+        userContentController.add(self, name: AppConfig.notificationMessageName)
         userContentController.addUserScript(
             WKUserScript(
                 source: credentialBridgeScript(),
                 injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+        )
+        userContentController.addUserScript(
+            WKUserScript(
+                source: nativeNotificationInterfaceScript(),
+                injectionTime: .atDocumentEnd,
                 forMainFrameOnly: true
             )
         )
@@ -140,6 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         window.makeKeyAndOrderFront(nil)
 
         loadDashboard()
+        notificationManager.start()
         NSApp.activate(ignoringOtherApps: true)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
@@ -156,8 +168,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func applicationWillTerminate(_ notification: Notification) {
         updateTimer?.invalidate()
+        notificationManager.stop()
         webView?.configuration.userContentController.removeScriptMessageHandler(
             forName: AppConfig.credentialMessageName
+        )
+        webView?.configuration.userContentController.removeScriptMessageHandler(
+            forName: AppConfig.notificationMessageName
         )
     }
 
@@ -602,6 +618,122 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         alert.beginSheetModal(for: window)
     }
 
+    private func configureMacNotifications() {
+        notificationManager.tokenProvider = {
+            CredentialStore.load()
+        }
+        notificationManager.onStatusChange = { [weak self] status in
+            self?.updateNotificationInterface(status)
+        }
+    }
+
+    private func updateNotificationInterface(_ status: MacNotificationStatus) {
+        let payload: [String: Any] = [
+            "enabled": status.enabled,
+            "authorization": status.authorization,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let json = String(data: data, encoding: .utf8)
+        else {
+            return
+        }
+        webView?.evaluateJavaScript("window.__macroPulseSetNotificationState && window.__macroPulseSetNotificationState(\(json));")
+    }
+
+    private func nativeNotificationInterfaceScript() -> String {
+        """
+        (() => {
+          const bridge = window.webkit && window.webkit.messageHandlers.nativeNotifications;
+          if (!bridge) return;
+
+          let state = { enabled: false, authorization: 'notDetermined' };
+          const isEnglish = () => document.documentElement.lang.toLowerCase().startsWith('en');
+
+          const copy = () => {
+            const english = isEnglish();
+            return {
+              title: english ? 'Mac notifications' : 'Mac 通知',
+              test: english ? 'Test' : '測試',
+              enabled: english
+                ? 'Release-result alerts are enabled.'
+                : '已啟用數據公布結果通知。',
+              disabled: english
+                ? 'Receive Actual / Forecast / Prior when results are published.'
+                : '數據公布後推播 Actual / Forecast / Prior。',
+              denied: english
+                ? 'Permission is off. Click the switch to open System Settings.'
+                : '通知權限已關閉；點擊開關前往系統設定。',
+              waiting: english
+                ? 'Waiting for macOS notification permission.'
+                : '等待 macOS 通知權限。',
+            };
+          };
+
+          const render = () => {
+            const row = document.getElementById('mac-native-notification-row');
+            if (!row) return;
+            const text = copy();
+            const toggle = document.getElementById('macNotificationsEnabled');
+            const test = document.getElementById('mac-notification-test');
+            const title = row.querySelector('.setting-title');
+            const help = row.querySelector('.setting-help');
+            title.textContent = text.title;
+            toggle.classList.toggle('on', Boolean(state.enabled) && state.authorization !== 'denied');
+            toggle.setAttribute('aria-pressed', String(Boolean(state.enabled)));
+            toggle.setAttribute('aria-label', text.title);
+            test.textContent = text.test;
+            test.disabled = !state.enabled || !['authorized', 'provisional'].includes(state.authorization);
+
+            if (state.authorization === 'denied') help.textContent = text.denied;
+            else if (state.authorization === 'notDetermined') help.textContent = text.waiting;
+            else help.textContent = state.enabled ? text.enabled : text.disabled;
+          };
+
+          const install = () => {
+            const list = document.querySelector('#settings-section .setting-list');
+            if (!list || document.getElementById('mac-native-notification-row')) return;
+            const row = document.createElement('div');
+            row.className = 'setting-row';
+            row.id = 'mac-native-notification-row';
+            row.innerHTML =
+              '<div><div class="setting-title"></div><div class="setting-help"></div></div>' +
+              '<div class="native-notification-controls">' +
+              '<button type="button" class="btn native-notification-test" id="mac-notification-test"></button>' +
+              '<button type="button" class="toggle" id="macNotificationsEnabled"></button>' +
+              '</div>';
+            list.insertBefore(row, list.firstChild);
+
+            document.getElementById('macNotificationsEnabled').addEventListener('click', () => {
+              if (state.authorization === 'denied') {
+                bridge.postMessage({ action: 'openSettings' });
+                return;
+              }
+              bridge.postMessage({ action: 'set', enabled: !state.enabled });
+            });
+            document.getElementById('mac-notification-test').addEventListener('click', () => {
+              bridge.postMessage({ action: 'test' });
+            });
+            render();
+            bridge.postMessage({ action: 'status' });
+          };
+
+          window.__macroPulseSetNotificationState = (next) => {
+            state = Object.assign({}, state, next || {});
+            install();
+            render();
+          };
+
+          new MutationObserver(() => {
+            install();
+            render();
+          }).observe(document.documentElement, { attributes: true, attributeFilter: ['lang'] });
+
+          install();
+          bridge.postMessage({ action: 'status' });
+        })();
+        """
+    }
+
     private func credentialBridgeScript() -> String {
         let savedToken = javascriptLiteral(CredentialStore.load())
 
@@ -726,17 +858,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.name == AppConfig.credentialMessageName,
-              let payload = message.body as? [String: Any],
+        guard let payload = message.body as? [String: Any],
               let action = payload["action"] as? String
         else {
             return
         }
 
-        if action == "save", let token = payload["value"] as? String {
-            CredentialStore.save(token)
-        } else if action == "clear" {
-            CredentialStore.clear()
+        if message.name == AppConfig.credentialMessageName {
+            if action == "save", let token = payload["value"] as? String {
+                CredentialStore.save(token)
+                notificationManager.credentialsDidChange()
+            } else if action == "clear" {
+                CredentialStore.clear()
+            }
+            return
+        }
+
+        guard message.name == AppConfig.notificationMessageName else {
+            return
+        }
+        switch action {
+        case "status":
+            notificationManager.publishStatus()
+        case "set":
+            notificationManager.setEnabled(payload["enabled"] as? Bool ?? false)
+        case "test":
+            notificationManager.sendTestNotification()
+        case "openSettings":
+            notificationManager.openNotificationSettings()
+        default:
+            break
         }
     }
 
@@ -779,6 +930,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         updateNavigationControls()
+        notificationManager.publishStatus()
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {

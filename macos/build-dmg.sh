@@ -28,7 +28,7 @@ xcodebuild -version
 
 APP_SOURCES=("${PROJECT_ROOT}/macos/MacroPulse/"*.swift)
 for architecture in arm64 x86_64; do
-  xcrun swiftc     -O     -warnings-as-errors     -target "${architecture}-apple-macos13.0"     -sdk "${SDK_PATH}"     "${APP_SOURCES[@]}"     -framework Cocoa     -framework WebKit     -framework Security     -framework CryptoKit     -o "${BUILD_ROOT}/${EXECUTABLE_NAME}-${architecture}"
+  xcrun swiftc     -O     -warnings-as-errors     -target "${architecture}-apple-macos13.0"     -sdk "${SDK_PATH}"     "${APP_SOURCES[@]}"     -framework Cocoa     -framework WebKit     -framework Security     -framework CryptoKit     -framework UserNotifications     -o "${BUILD_ROOT}/${EXECUTABLE_NAME}-${architecture}"
 
   xcrun swiftc     -O     -warnings-as-errors     -target "${architecture}-apple-macos13.0"     -sdk "${SDK_PATH}"     "${PROJECT_ROOT}/macos/MacroPulseUpdater/main.swift"     -framework Foundation     -o "${BUILD_ROOT}/${HELPER_NAME}-${architecture}"
 

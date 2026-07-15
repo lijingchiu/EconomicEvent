@@ -1021,3 +1021,35 @@ html.native-macos-app[data-theme="dark"] .site-header {
     inset 0 0 0 1px rgba(255, 255, 255, .13),
     inset 0 1px 0 rgba(255, 255, 255, .16);
 }
+
+
+html.native-macos-app .native-notification-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  flex: 0 0 auto;
+}
+
+html.native-macos-app .native-notification-test {
+  min-height: 30px;
+  padding: 6px 10px;
+  border-radius: 10px;
+}
+
+html.native-macos-app .native-notification-test:disabled {
+  opacity: .42;
+  cursor: default;
+  transform: none;
+}
+
+@media (max-width: 520px) {
+  html.native-macos-app #mac-native-notification-row {
+    align-items: flex-start;
+  }
+
+  html.native-macos-app .native-notification-controls {
+    flex-direction: column-reverse;
+    align-items: flex-end;
+  }
+}

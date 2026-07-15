@@ -7,6 +7,12 @@ on:
     paths:
       - ".github/workflows/build-macos-dmg.yml"
       - "macos/**"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-macos-dmg.yml"
+      - "macos/**"
   workflow_dispatch:
 
 permissions:
@@ -37,8 +43,14 @@ jobs:
           retention-days: 30
 
       - name: Publish prerelease download
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="macos-build-${GITHUB_RUN_NUMBER}"
-          gh release create "${TAG}"             dist/MacroPulse-macOS-Universal.dmg             dist/MacroPulse-macOS-Universal.dmg.sha256             --target "${GITHUB_SHA}"             --prerelease             --title "Macro Pulse macOS Build ${GITHUB_RUN_NUMBER}"             --notes "Universal macOS 13+ build for Apple Silicon and Intel. This build uses ad-hoc signing and is not Apple-notarized."
+        run: >
+          gh release create "macos-build-${GITHUB_RUN_NUMBER}"
+          dist/MacroPulse-macOS-Universal.dmg
+          dist/MacroPulse-macOS-Universal.dmg.sha256
+          --target "${GITHUB_SHA}"
+          --prerelease
+          --title "Macro Pulse macOS Build ${GITHUB_RUN_NUMBER}"
+          --notes "Universal macOS 13+ build for Apple Silicon and Intel. This build uses ad-hoc signing and is not Apple-notarized."

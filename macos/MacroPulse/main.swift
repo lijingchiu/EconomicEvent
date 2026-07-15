@@ -12,6 +12,7 @@ private enum AppConfig {
 private extension NSToolbarItem.Identifier {
     static let navigation = NSToolbarItem.Identifier("com.lijingchiu.macropulse.navigation")
     static let reload = NSToolbarItem.Identifier("com.lijingchiu.macropulse.reload")
+    static let update = NSToolbarItem.Identifier("com.lijingchiu.macropulse.update")
     static let liveStatus = NSToolbarItem.Identifier("com.lijingchiu.macropulse.live-status")
     static let openInBrowser = NSToolbarItem.Identifier("com.lijingchiu.macropulse.open-browser")
 }
@@ -77,9 +78,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var window: NSWindow!
     private var webView: WKWebView!
     private weak var navigationControl: NSSegmentedControl!
+    private weak var updateButton: NSButton!
+    private var updateMenuItem: NSMenuItem?
+    private let updateManager = UpdateManager()
+    private var updateTimer: Timer?
+    private var updateCheckWasManual = false
+    private var updateActionWasUserInitiated = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMainMenu()
+        configureUpdateManager()
 
         let userContentController = WKUserContentController()
         userContentController.add(self, name: AppConfig.credentialMessageName)
@@ -133,9 +141,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
         loadDashboard()
         NSApp.activate(ignoringOtherApps: true)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.checkForUpdatesInBackground()
+        }
+        updateTimer = Timer.scheduledTimer(
+            timeInterval: 6 * 60 * 60,
+            target: self,
+            selector: #selector(checkForUpdatesInBackground),
+            userInfo: nil,
+            repeats: true
+        )
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        updateTimer?.invalidate()
         webView?.configuration.userContentController.removeScriptMessageHandler(
             forName: AppConfig.credentialMessageName
         )
@@ -143,6 +163,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        return true
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard urls.contains(where: { $0.scheme?.lowercased() == "macropulse" }) else {
+            return
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        loadDashboard()
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func installMainMenu() {
@@ -159,6 +195,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             keyEquivalent: ""
         )
         aboutItem.target = NSApp
+
+        let checkForUpdatesItem = applicationMenu.addItem(
+            withTitle: "Check for Updates…",
+            action: #selector(updateButtonPressed(_:)),
+            keyEquivalent: ""
+        )
+        checkForUpdatesItem.target = self
+        updateMenuItem = checkForUpdatesItem
+
         applicationMenu.addItem(.separator())
         applicationMenu.addItem(
             withTitle: "Quit \(AppConfig.name)",
@@ -213,11 +258,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.navigation, .reload, .flexibleSpace, .liveStatus, .openInBrowser]
+        [.navigation, .reload, .flexibleSpace, .update, .liveStatus, .openInBrowser]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.navigation, .reload, .flexibleSpace, .liveStatus, .openInBrowser]
+        [.navigation, .reload, .flexibleSpace, .update, .liveStatus, .openInBrowser]
     }
 
     func toolbar(
@@ -257,6 +302,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             item.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Reload")
             item.target = self
             item.action = #selector(reloadPage(_:))
+            return item
+
+        case .update:
+            let button = NSButton(
+                title: "Updates",
+                target: self,
+                action: #selector(updateButtonPressed(_:))
+            )
+            button.bezelStyle = .rounded
+            button.controlSize = .small
+            button.image = NSImage(
+                systemSymbolName: "arrow.triangle.2.circlepath",
+                accessibilityDescription: "Check for Updates"
+            )
+            button.imagePosition = .imageLeading
+            button.toolTip = "Check for a newer Macro Pulse version"
+            button.frame = NSRect(x: 0, y: 0, width: 104, height: 28)
+            updateButton = button
+
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            item.label = "Updates"
+            item.paletteLabel = "Updates"
+            item.view = button
             return item
 
         case .liveStatus:
@@ -323,6 +391,187 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         material.layer?.masksToBounds = true
         material.addSubview(makeLiveStatusLabel(frame: labelFrame))
         return material
+    }
+
+    private func configureUpdateManager() {
+        updateManager.onStateChange = { [weak self] state in
+            self?.applyUpdateState(state)
+        }
+    }
+
+    @objc private func checkForUpdatesInBackground() {
+        guard !updateActionWasUserInitiated else {
+            return
+        }
+        updateManager.check()
+    }
+
+    @objc private func updateButtonPressed(_ sender: Any?) {
+        switch updateManager.state {
+        case let .available(update):
+            updateActionWasUserInitiated = true
+            updateManager.downloadAvailableUpdate()
+            updateMenuItem?.title = "Downloading \(update.version)…"
+
+        case let .downloaded(_, url):
+            NSWorkspace.shared.open(url)
+
+        case .checking, .downloading:
+            break
+
+        default:
+            updateCheckWasManual = true
+            updateManager.check()
+        }
+    }
+
+    private func applyUpdateState(_ state: UpdateState) {
+        switch state {
+        case .idle:
+            setUpdateButton(
+                title: "Updates",
+                symbol: "arrow.triangle.2.circlepath",
+                enabled: true,
+                toolTip: "Check for a newer Macro Pulse version"
+            )
+
+        case .checking:
+            setUpdateButton(
+                title: "Checking…",
+                symbol: "arrow.triangle.2.circlepath",
+                enabled: false,
+                toolTip: "Checking GitHub Releases"
+            )
+
+        case let .current(version):
+            setUpdateButton(
+                title: "Updates",
+                symbol: "checkmark.circle",
+                enabled: true,
+                toolTip: "Macro Pulse \(version) is up to date"
+            )
+            updateMenuItem?.title = "Check for Updates…"
+
+            if updateCheckWasManual {
+                updateCheckWasManual = false
+                presentMessage(
+                    title: "Macro Pulse is up to date",
+                    message: "Version \(version) is the newest available version."
+                )
+            }
+
+        case let .available(update):
+            setUpdateButton(
+                title: "Update \(update.version)",
+                symbol: "arrow.down.circle.fill",
+                enabled: true,
+                toolTip: "Download Macro Pulse \(update.version)"
+            )
+            updateMenuItem?.title = "Download Update \(update.version)…"
+
+            if updateCheckWasManual {
+                updateCheckWasManual = false
+                presentAvailableUpdate(update)
+            }
+
+        case let .downloading(update):
+            setUpdateButton(
+                title: "Downloading…",
+                symbol: "arrow.down.circle",
+                enabled: false,
+                toolTip: "Downloading Macro Pulse \(update.version)"
+            )
+            updateMenuItem?.title = "Downloading Update \(update.version)…"
+
+        case let .downloaded(update, url):
+            setUpdateButton(
+                title: "Open \(update.version)",
+                symbol: "externaldrive.fill.badge.checkmark",
+                enabled: true,
+                toolTip: "Open the verified update DMG"
+            )
+            updateMenuItem?.title = "Open Downloaded Update \(update.version)…"
+
+            if updateActionWasUserInitiated {
+                updateActionWasUserInitiated = false
+                presentDownloadedUpdate(update, at: url)
+            }
+
+        case let .failed(message):
+            setUpdateButton(
+                title: "Retry Update",
+                symbol: "exclamationmark.arrow.triangle.2.circlepath",
+                enabled: true,
+                toolTip: message
+            )
+            updateMenuItem?.title = "Check for Updates…"
+
+            if updateCheckWasManual || updateActionWasUserInitiated {
+                updateCheckWasManual = false
+                updateActionWasUserInitiated = false
+                presentMessage(title: "Update failed", message: message, style: .warning)
+            }
+        }
+    }
+
+    private func setUpdateButton(
+        title: String,
+        symbol: String,
+        enabled: Bool,
+        toolTip: String
+    ) {
+        updateButton?.title = title
+        updateButton?.image = NSImage(
+            systemSymbolName: symbol,
+            accessibilityDescription: title
+        )
+        updateButton?.isEnabled = enabled
+        updateButton?.toolTip = toolTip
+    }
+
+    private func presentAvailableUpdate(_ update: AppUpdate) {
+        let alert = NSAlert()
+        alert.messageText = "Macro Pulse \(update.version) is available"
+        alert.informativeText = "The update will be downloaded from the project's GitHub Release and verified with SHA-256 before it is saved."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Download Update")
+        alert.addButton(withTitle: "Later")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else {
+                return
+            }
+            self?.updateActionWasUserInitiated = true
+            self?.updateManager.downloadAvailableUpdate()
+        }
+    }
+
+    private func presentDownloadedUpdate(_ update: AppUpdate, at url: URL) {
+        let alert = NSAlert()
+        alert.messageText = "Macro Pulse \(update.version) is ready"
+        alert.informativeText = "The DMG was downloaded to Downloads and passed SHA-256 verification. Open it, then drag Macro Pulse to Applications."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Open DMG")
+        alert.addButton(withTitle: "Show in Finder")
+        alert.beginSheetModal(for: window) { response in
+            if response == .alertFirstButtonReturn {
+                NSWorkspace.shared.open(url)
+            } else {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
+        }
+    }
+
+    private func presentMessage(
+        title: String,
+        message: String,
+        style: NSAlert.Style = .informational
+    ) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = style
+        alert.addButton(withTitle: "OK")
+        alert.beginSheetModal(for: window)
     }
 
     private func credentialBridgeScript() -> String {

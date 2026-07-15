@@ -3,6 +3,7 @@ import CryptoKit
 
 struct AppUpdate {
     let version: String
+    let buildNumber: Int
     let tagName: String
     let downloadURL: URL
     let digest: String?
@@ -37,6 +38,10 @@ final class UpdateManager {
 
     private var currentVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
+    }
+
+    private var currentBuildNumber: Int {
+        Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
     }
 
     func check() {
@@ -149,15 +154,19 @@ final class UpdateManager {
     private func newestUpdate(in releases: [GitHubRelease]) -> AppUpdate? {
         let candidates = releases.compactMap { release -> AppUpdate? in
             guard !release.draft,
-                  let version = version(from: release.tagName),
-                  compare(version, currentVersion) == .orderedDescending,
+                  let releaseVersion = version(from: release.tagName),
+                  isNewer(
+                      version: releaseVersion.version,
+                      buildNumber: releaseVersion.build
+                  ),
                   let asset = release.assets.first(where: { $0.name == assetName })
             else {
                 return nil
             }
 
             return AppUpdate(
-                version: version,
+                version: releaseVersion.version,
+                buildNumber: releaseVersion.build,
                 tagName: release.tagName,
                 downloadURL: asset.browserDownloadURL,
                 digest: asset.digest,
@@ -166,11 +175,15 @@ final class UpdateManager {
         }
 
         return candidates.max {
-            compare($0.version, $1.version) == .orderedAscending
+            let versionComparison = compare($0.version, $1.version)
+            if versionComparison == .orderedSame {
+                return $0.buildNumber < $1.buildNumber
+            }
+            return versionComparison == .orderedAscending
         }
     }
 
-    private func version(from tagName: String) -> String? {
+    private func version(from tagName: String) -> (version: String, build: Int)? {
         let prefix = "macos-v"
         guard tagName.hasPrefix(prefix) else {
             return nil
@@ -182,11 +195,26 @@ final class UpdateManager {
         }
 
         let version = String(remainder[..<separator.lowerBound])
+        let buildString = String(remainder[separator.upperBound...])
         let components = version.split(separator: ".")
-        guard components.count >= 3, components.allSatisfy({ Int($0) != nil }) else {
+        guard components.count >= 3,
+              components.allSatisfy({ Int($0) != nil }),
+              let build = Int(buildString)
+        else {
             return nil
         }
-        return version
+        return (version: version, build: build)
+    }
+
+    private func isNewer(version: String, buildNumber: Int) -> Bool {
+        let versionComparison = compare(version, currentVersion)
+        if versionComparison == .orderedDescending {
+            return true
+        }
+        if versionComparison == .orderedSame {
+            return buildNumber > currentBuildNumber
+        }
+        return false
     }
 
     private func compare(_ lhs: String, _ rhs: String) -> ComparisonResult {

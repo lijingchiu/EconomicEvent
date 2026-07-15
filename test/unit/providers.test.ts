@@ -46,8 +46,9 @@ describe("official provider adapters", () => {
   it("parses Federal Reserve FOMC calendar HTML", async () => {
     mockFetch({ "2026-july.htm": { body: read("test/fixtures/federal-reserve/july.html") } });
     const result = await new FederalReserveProvider().fetchEvents(range, env);
-    expect(result.events.map((event) => event.name)).toEqual(["FOMC Minutes", "FOMC Press Conference", "FOMC Interest Rate Decision", "Beige Book"]);
+    expect(result.events.map((event) => event.name)).toEqual(["FOMC Minutes", "FOMC Press Conference", "FOMC Interest Rate Decision", "Beige Book", "Fed Chair Warsh Testimony"]);
     expect(result.events[0].eventTimeUtc).toBe("2026-07-08T18:00:00.000Z");
+    expect(result.events.at(-1)?.eventTimeUtc).toBe("2026-07-15T14:00:00.000Z");
   });
 
   it("builds EIA weekly events from official schedule rules", async () => {

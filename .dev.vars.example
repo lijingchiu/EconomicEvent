@@ -1,2 +1,4 @@
 DISCORD_WEBHOOK_URL=replace_me
 ADMIN_TOKEN=replace_me
+# Optional: raises the official BLS API request quota.
+BLS_API_KEY=

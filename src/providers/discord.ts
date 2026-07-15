@@ -1,6 +1,7 @@
 import type { EconomicEvent, Env, Impact, Market } from "../types";
 import { formatInTimezone } from "../domain/time";
 import { CATEGORY_LABELS } from "../domain/categories";
+import { buildMarketSignals } from "../domain/market-signal";
 
 export type DiscordPayload = {
   content?: string;
@@ -29,6 +30,7 @@ function metricValue(value: string | null | undefined, unit: string | null | und
 export function buildEventPayload(event: EconomicEvent, reminderMinutes: number, env: Env): DiscordPayload {
   const mention = mentionPolicy(env.DISCORD_MENTION?.trim() ?? "");
   const minutesText = reminderMinutes === 1 ? "1 分鐘" : `${reminderMinutes} 分鐘`;
+  const signals = buildMarketSignals(event);
   return {
     ...(mention.content ? { content: mention.content } : {}),
     embeds: [{
@@ -44,6 +46,7 @@ export function buildEventPayload(event: EconomicEvent, reminderMinutes: number,
         { name: "Actual", value: metricValue(event.actualValue, event.valueUnit), inline: true },
         { name: "Forecast", value: metricValue(event.forecastValue, event.valueUnit), inline: true },
         { name: "Prior", value: metricValue(event.previousValue, event.valueUnit), inline: true },
+        ...(signals.length ? [{ name: "市場方向", value: signals.map((signal) => signal.label).join("、"), inline: false }] : []),
         { name: "可能影響市場", value: event.affectedMarkets.map((market) => marketLabels[market]).join("、"), inline: false },
         { name: "資料來源", value: `${event.provider.toUpperCase()} — ${event.sourceUrl}`, inline: false },
       ],
@@ -59,6 +62,31 @@ export function buildTestPayload(env: Env): DiscordPayload {
   return {
     ...(mention.content ? { content: mention.content } : {}),
     embeds: [{ title: "🔔 經濟事件通知系統測試", description: "這是一則明確的 Discord Webhook 測試訊息，不代表實際經濟事件。", color: COLORS.test, fields: [{ name: "狀態", value: "Webhook 可用" }], footer: { text: "測試訊息" }, timestamp: new Date().toISOString() }],
+    allowed_mentions: mention.allowed_mentions,
+  };
+}
+
+export function buildEventResultPayload(event: EconomicEvent, env: Env): DiscordPayload {
+  const mention = mentionPolicy(env.DISCORD_MENTION?.trim() ?? "");
+  const signals = buildMarketSignals(event);
+  return {
+    ...(mention.content ? { content: mention.content } : {}),
+    embeds: [{
+      title: "📊 美國經濟數據公布",
+      description: `${event.name} 官方結果已同步。`,
+      color: COLORS[event.impact],
+      fields: [
+        { name: "事件", value: event.name, inline: false },
+        { name: "本地時間", value: formatInTimezone(event.eventTimeUtc, event.localDisplayTimezone), inline: true },
+        { name: "Actual", value: metricValue(event.actualValue, event.valueUnit), inline: true },
+        { name: "Forecast", value: metricValue(event.forecastValue, event.valueUnit), inline: true },
+        { name: "Prior", value: metricValue(event.previousValue, event.valueUnit), inline: true },
+        ...(signals.length ? [{ name: "市場方向", value: signals.map((signal) => signal.label).join("、"), inline: false }] : []),
+        { name: "資料來源", value: `${event.provider.toUpperCase()} — ${event.valueSourceUrl ?? event.sourceUrl}`, inline: false },
+      ],
+      footer: { text: "Actual 為官方資料；市場方向僅在 Actual 與 Forecast 均可比較時顯示。" },
+      timestamp: new Date().toISOString(),
+    }],
     allowed_mentions: mention.allowed_mentions,
   };
 }
@@ -94,6 +122,7 @@ export class DiscordWebhookClient {
   }
 
   async sendEventReminder(event: EconomicEvent, reminderMinutes: number): Promise<{ messageId?: string }> { return this.send(buildEventPayload(event, reminderMinutes, this.env)); }
+  async sendEventResult(event: EconomicEvent): Promise<{ messageId?: string }> { return this.send(buildEventResultPayload(event, this.env)); }
   async sendTest(): Promise<{ messageId?: string }> { return this.send(buildTestPayload(this.env)); }
 }
 

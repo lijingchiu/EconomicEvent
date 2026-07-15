@@ -1,8 +1,20 @@
 import type { AppConfig } from "../types";
 import type { EconomicEvent } from "../types";
 import { reminderSchedule } from "../domain/reminder";
+import { buildMarketSignals } from "../domain/market-signal";
+import { explainEvent } from "../domain/event-explanation";
 
 export type EventFilter = { fromUtc: string; toUtc: string; provider?: string; category?: string; impact?: string; limit?: number };
+
+export type EventValueCandidate = Pick<EconomicEvent, "id" | "provider" | "name" | "eventTimeUtc">;
+
+export type EventValueUpdate = {
+  actualValue: string;
+  previousValue: string | null;
+  valueUnit: string | null;
+  valueSourceUrl: string;
+  sourceUpdatedAt: string;
+};
 
 export async function upsertEconomicEvent(db: D1Database, event: EconomicEvent, config: AppConfig): Promise<"inserted" | "updated"> {
   const existing = await db.prepare("SELECT id, created_at, event_time_utc FROM economic_events WHERE id = ?").bind(event.id).first<{ id: string; created_at: string; event_time_utc: string }>();
@@ -34,13 +46,58 @@ export async function listEvents(db: D1Database, filter: EventFilter): Promise<R
   if (filter.impact) { conditions.push("impact = ?"); values.push(filter.impact); }
   const limit = Math.min(Math.max(filter.limit ?? 30, 1), 200);
   const result = await db.prepare(`SELECT id, provider, provider_event_id AS providerEventId, source_url AS sourceUrl, name, normalized_name AS normalizedName, category, country, currency, event_time_utc AS eventTimeUtc, local_display_timezone AS localDisplayTimezone, impact, affected_markets_json AS affectedMarketsJson, description, actual_value AS actualValue, forecast_value AS forecastValue, previous_value AS previousValue, value_unit AS valueUnit, value_source_url AS valueSourceUrl, source_updated_at AS sourceUpdatedAt, raw_hash AS rawHash, created_at AS createdAt, updated_at AS updatedAt FROM economic_events WHERE ${conditions.join(" AND ")} ORDER BY event_time_utc ASC LIMIT ?`).bind(...values, limit).all<Record<string, unknown>>();
-  return result.results;
+  return result.results.map((row) => ({
+    ...row,
+    marketSignals: buildMarketSignals({
+      id: String(row.id), provider: row.provider as EconomicEvent["provider"], sourceUrl: String(row.sourceUrl), name: String(row.name), normalizedName: String(row.normalizedName), category: row.category as EconomicEvent["category"], country: "US", currency: "USD", eventTimeUtc: String(row.eventTimeUtc), localDisplayTimezone: String(row.localDisplayTimezone), impact: row.impact as EconomicEvent["impact"], affectedMarkets: JSON.parse(String(row.affectedMarketsJson)) as EconomicEvent["affectedMarkets"], description: row.description ? String(row.description) : null, actualValue: row.actualValue ? String(row.actualValue) : null, forecastValue: row.forecastValue ? String(row.forecastValue) : null, previousValue: row.previousValue ? String(row.previousValue) : null, valueUnit: row.valueUnit ? String(row.valueUnit) : null, valueSourceUrl: row.valueSourceUrl ? String(row.valueSourceUrl) : null, sourceUpdatedAt: row.sourceUpdatedAt ? String(row.sourceUpdatedAt) : null, rawHash: String(row.rawHash),
+    }),
+    eventExplanation: explainEvent({
+      id: String(row.id), provider: row.provider as EconomicEvent["provider"], sourceUrl: String(row.sourceUrl), name: String(row.name), normalizedName: String(row.normalizedName), category: row.category as EconomicEvent["category"], country: "US", currency: "USD", eventTimeUtc: String(row.eventTimeUtc), localDisplayTimezone: String(row.localDisplayTimezone), impact: row.impact as EconomicEvent["impact"], affectedMarkets: JSON.parse(String(row.affectedMarketsJson)) as EconomicEvent["affectedMarkets"], description: row.description ? String(row.description) : null, actualValue: row.actualValue ? String(row.actualValue) : null, forecastValue: row.forecastValue ? String(row.forecastValue) : null, previousValue: row.previousValue ? String(row.previousValue) : null, valueUnit: row.valueUnit ? String(row.valueUnit) : null, valueSourceUrl: row.valueSourceUrl ? String(row.valueSourceUrl) : null, sourceUpdatedAt: row.sourceUpdatedAt ? String(row.sourceUpdatedAt) : null, rawHash: String(row.rawHash),
+    }),
+  }));
 }
 
 export async function getEvent(db: D1Database, id: string): Promise<EconomicEvent | null> {
   const row = await db.prepare("SELECT * FROM economic_events WHERE id = ?").bind(id).first<Record<string, unknown>>();
   if (!row) return null;
   return { id: String(row.id), provider: row.provider as EconomicEvent["provider"], providerEventId: row.provider_event_id ? String(row.provider_event_id) : undefined, sourceUrl: String(row.source_url), name: String(row.name), normalizedName: String(row.normalized_name), category: row.category as EconomicEvent["category"], country: "US", currency: "USD", eventTimeUtc: String(row.event_time_utc), localDisplayTimezone: String(row.local_display_timezone), impact: row.impact as EconomicEvent["impact"], affectedMarkets: JSON.parse(String(row.affected_markets_json)) as EconomicEvent["affectedMarkets"], description: row.description ? String(row.description) : null, actualValue: row.actual_value ? String(row.actual_value) : null, forecastValue: row.forecast_value ? String(row.forecast_value) : null, previousValue: row.previous_value ? String(row.previous_value) : null, valueUnit: row.value_unit ? String(row.value_unit) : null, valueSourceUrl: row.value_source_url ? String(row.value_source_url) : null, sourceUpdatedAt: row.source_updated_at ? String(row.source_updated_at) : null, rawHash: String(row.raw_hash) };
+}
+
+export async function listEventsMissingValues(db: D1Database, fromUtc: string, toUtc: string): Promise<EventValueCandidate[]> {
+  const result = await db.prepare(`SELECT id, provider, name, event_time_utc AS eventTimeUtc
+    FROM economic_events
+    WHERE actual_value IS NULL
+      AND (
+        (provider = 'bls' AND name IN ('Inflation Rate MoM', 'Core Inflation Rate MoM', 'Inflation Rate YoY', 'Core Inflation Rate YoY', 'PPI MoM', 'Non Farm Payrolls', 'Unemployment Rate'))
+        OR provider = 'umich'
+      )
+      AND event_time_utc >= ?
+      AND event_time_utc <= ?
+    ORDER BY event_time_utc ASC`).bind(fromUtc, toUtc).all<EventValueCandidate>();
+  return result.results;
+}
+
+export async function setOfficialEventValues(db: D1Database, id: string, update: EventValueUpdate): Promise<boolean> {
+  const now = new Date().toISOString();
+  const result = await db.prepare(`UPDATE economic_events
+    SET actual_value = ?, previous_value = COALESCE(?, previous_value), value_unit = ?, value_source_url = ?, source_updated_at = ?, updated_at = ?
+    WHERE id = ? AND actual_value IS NULL`).bind(
+    update.actualValue,
+    update.previousValue,
+    update.valueUnit,
+    update.valueSourceUrl,
+    update.sourceUpdatedAt,
+    now,
+    id,
+  ).run();
+  const updated = Number(result.meta.changes ?? 0) > 0;
+  if (updated) {
+    // -1 is reserved for the one-time post-release result notification.
+    await db.prepare(`INSERT INTO notification_deliveries (event_id, reminder_minutes, scheduled_for_utc, status, attempts, created_at, updated_at)
+      VALUES (?, -1, ?, 'pending', 0, ?, ?)
+      ON CONFLICT(event_id, reminder_minutes) DO NOTHING`).bind(id, now, now, now).run();
+  }
+  return updated;
 }
 
 export async function upcomingCount(db: D1Database, now: string): Promise<number> { const result = await db.prepare("SELECT COUNT(*) AS count FROM economic_events WHERE event_time_utc > ?").bind(now).first<{ count: number }>(); return Number(result?.count ?? 0); }

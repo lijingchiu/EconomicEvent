@@ -32,21 +32,17 @@ function monthRange(fromUtc: Date, toUtc: Date): Array<{ year: number; month: nu
   return result;
 }
 
-function yearRange(fromUtc: Date, toUtc: Date): number[] {
-  const result: number[] = [];
-  for (let year = fromUtc.getUTCFullYear(); year <= toUtc.getUTCFullYear(); year += 1) result.push(year);
-  return result;
-}
-
-function pageEvents(text: string, year: number, kind: "speech" | "testimony"): Array<{ date: string; description: string }> {
-  const matches = [...text.matchAll(/\b(\d{1,2}\/\d{1,2}\/\d{4})\b/g)];
-  const result: Array<{ date: string; description: string }> = [];
-  for (let index = 0; index < matches.length; index += 1) {
-    const match = matches[index];
-    if (!match.index || Number(match[1].slice(-4)) !== year) continue;
-    const segment = text.slice(match.index, matches[index + 1]?.index ?? text.length).replace(/\s+/g, " ").trim();
-    if (!/Christopher J\. Waller/i.test(segment)) continue;
-    result.push({ date: match[1], description: segment.slice(0, 320) });
+function chairAppearances(text: string): Array<{ day: string; time: string; kind: "Speech" | "Testimony" | "Discussion"; surname: string; description: string }> {
+  const result: Array<{ day: string; time: string; kind: "Speech" | "Testimony" | "Discussion"; surname: string; description: string }> = [];
+  const pattern = /(\d{1,2}:\d{2}\s*[ap]\.?(?:m)\.?)\s+(Speech|Testimony|Discussion)\s*-\s*Chair(?:man|woman)?\s+([A-Z][A-Za-z.'-]+)\s+([A-Z][A-Za-z.'-]+)/g;
+  for (const match of text.matchAll(pattern)) {
+    const start = (match.index ?? 0) + match[0].length;
+    const next = text.slice(start).search(/\s\d{1,2}:\d{2}\s*[ap]\.?(?:m)\.?\s/);
+    const segment = text.slice(start, next >= 0 ? start + next : Math.min(text.length, start + 700)).replace(/\s+/g, " ").trim();
+    const dayMatches = [...segment.matchAll(/\b([1-3]?\d)\b/g)];
+    const day = dayMatches.at(-1)?.[1];
+    if (!day) continue;
+    result.push({ day, time: match[1], kind: match[2] as "Speech" | "Testimony" | "Discussion", surname: match[4], description: segment.slice(0, 320) });
   }
   return result;
 }
@@ -79,31 +75,17 @@ export class FederalReserveProvider implements EconomicCalendarProvider {
             if (built.event) events.push(built.event); else if (built.warning) warnings.push(built.warning);
           } catch (error) { warnings.push({ code: "event_parse_failed", message: error instanceof Error ? error.message : "failed to parse Federal Reserve event", provider: this.name, sourceUrl }); }
         }
+        for (const appearance of chairAppearances(text)) {
+          try {
+            const date = parseDateOnly(`${MONTHS[month - 1]} ${appearance.day}, ${year}`);
+            const eventTimeUtc = dateAndTimeToUtc(date, appearance.time);
+            if (!inRange(eventTimeUtc, range.fromUtc, range.toUtc)) continue;
+            const kind = appearance.kind === "Discussion" ? "Speech" : appearance.kind;
+            const built = await eventFromRelease({ provider: "federal_reserve", providerEventId: `${date}|chair-${appearance.surname.toLowerCase()}-${appearance.kind.toLowerCase()}`, sourceUrl, name: `Fed Chair ${appearance.surname} ${kind}`, eventTimeUtc, description: appearance.description, sourceUpdatedAt: fetchedAtUtc, raw: { appearance, year, month } }, env, config);
+            if (built.event) events.push(built.event); else if (built.warning) warnings.push(built.warning);
+          } catch (error) { warnings.push({ code: "event_parse_failed", message: error instanceof Error ? error.message : "failed to parse Federal Reserve Chair appearance", provider: this.name, sourceUrl }); }
+        }
       } catch (error) { warnings.push({ code: "source_fetch_failed", message: error instanceof Error ? error.message : "failed to fetch Federal Reserve calendar", provider: this.name, sourceUrl }); }
-    }
-    // The Fed's annual speeches/testimony index is the official source for
-    // scheduled Waller appearances that do not appear on the FOMC calendar.
-    for (const year of yearRange(range.fromUtc, range.toUtc)) {
-      for (const kind of ["speech", "testimony"] as const) {
-        const sourceUrl = `https://www.federalreserve.gov/newsevents/${year}-${kind === "speech" ? "speeches" : "testimony"}.htm`;
-        try {
-          const response = await fetchWithTimeout(sourceUrl, { headers: { accept: "text/html" } });
-          const body = await readBodyWithLimit(response);
-          if (response.status === 404) continue;
-          if (!response.ok) throw new Error(`source returned HTTP ${response.status}`);
-          if (!/text\/html/i.test(response.headers.get("content-type") ?? "")) throw new Error("Federal Reserve speech index returned an unexpected content type");
-          for (const item of pageEvents(htmlToText(body), year, kind)) {
-            try {
-              const date = parseDateOnly(item.date);
-              const eventTimeUtc = dateAndTimeToUtc(date, "10:00 AM");
-              if (!inRange(eventTimeUtc, range.fromUtc, range.toUtc)) continue;
-              const title = kind === "testimony" ? "Fed Chair Waller Testimony" : "Fed Chair Waller Speech";
-              const built = await eventFromRelease({ provider: "federal_reserve", providerEventId: `${date}|waller-${kind}`, sourceUrl, name: title, eventTimeUtc, description: item.description, sourceUpdatedAt: fetchedAtUtc, raw: { item, kind } }, env, config);
-              if (built.event) events.push(built.event); else if (built.warning) warnings.push(built.warning);
-            } catch (error) { warnings.push({ code: "event_parse_failed", message: error instanceof Error ? error.message : "failed to parse Federal Reserve Waller event", provider: this.name, sourceUrl }); }
-          }
-        } catch (error) { warnings.push({ code: "source_fetch_failed", message: error instanceof Error ? error.message : "failed to fetch Federal Reserve speech index", provider: this.name, sourceUrl }); }
-      }
     }
     if (!events.length) warnings.push({ code: "no_events", message: "Federal Reserve calendar contained no tracked events in requested range", provider: this.name, sourceUrl: this.sourceUrl });
     return { provider: this.name, fetchedAtUtc, sourceUrl: this.sourceUrl, events, warnings };

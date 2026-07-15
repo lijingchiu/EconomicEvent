@@ -103,6 +103,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         )
         userContentController.addUserScript(
             WKUserScript(
+                source: nativeShellPreflightScript(),
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+        )
+        userContentController.addUserScript(
+            WKUserScript(
                 source: nativeNotificationInterfaceScript(),
                 injectionTime: .atDocumentEnd,
                 forMainFrameOnly: true
@@ -774,11 +781,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         """
     }
 
+    private func nativeShellPreflightScript() -> String {
+        """
+        (() => {
+          const root = document.documentElement;
+          root.classList.add('native-macos-app');
+          root.dataset.nativeShell = 'liquid-glass';
+          root.style.visibility = 'hidden';
+        })();
+        """
+    }
+
     private func liquidGlassInterfaceScript() -> String {
         guard let url = Bundle.main.url(forResource: "liquid-glass", withExtension: "css"),
               let css = try? String(contentsOf: url, encoding: .utf8)
         else {
-            return "document.documentElement.classList.add('native-macos-app');"
+            return "document.documentElement.classList.add('native-macos-app'); document.documentElement.style.removeProperty('visibility');"
         }
 
         let stylesheet = javascriptLiteral(css)
@@ -792,9 +810,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
           if (!style) {
             style = document.createElement('style');
             style.id = 'macro-pulse-native-liquid-glass';
-            document.head.appendChild(style);
+            (document.head || root).appendChild(style);
           }
           style.textContent = \(stylesheet);
+          root.style.removeProperty('visibility');
 
           let pointerFrame = 0;
           let pointerX = innerWidth / 2;

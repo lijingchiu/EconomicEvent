@@ -32,7 +32,7 @@ for architecture in arm64 x86_64; do
 
   xcrun swiftc     -O     -warnings-as-errors     -target "${architecture}-apple-macos13.0"     -sdk "${SDK_PATH}"     "${PROJECT_ROOT}/macos/MacroPulseUpdater/main.swift"     -framework Foundation     -o "${BUILD_ROOT}/${HELPER_NAME}-${architecture}"
 
-  xcrun swiftc     -O     -warnings-as-errors     -parse-as-library     -application-extension     -target "${architecture}-apple-macos13.0"     -sdk "${SDK_PATH}"     "${PROJECT_ROOT}/macos/MacroPulseWidget/MacroPulseWidget.swift"     -framework Foundation     -framework SwiftUI     -framework WidgetKit     -o "${BUILD_ROOT}/${WIDGET_NAME}-${architecture}"
+  xcrun swiftc     -O     -warnings-as-errors     -parse-as-library     -application-extension     -target "${architecture}-apple-macos13.0"     -sdk "${SDK_PATH}"     "${PROJECT_ROOT}/macos/MacroPulseWidget/MacroPulseWidget.swift"     -framework Foundation     -framework SwiftUI     -framework WidgetKit     -module-name MacroPulseWidget -o "${BUILD_ROOT}/${WIDGET_NAME}-${architecture}"
 done
 
 lipo -create   "${BUILD_ROOT}/${EXECUTABLE_NAME}-arm64"   "${BUILD_ROOT}/${EXECUTABLE_NAME}-x86_64"   -output "${CONTENTS}/MacOS/${EXECUTABLE_NAME}"
@@ -54,6 +54,7 @@ cp "${PROJECT_ROOT}/macos/MacroPulseWidget/Info.plist" "${WIDGET_CONTENTS}/Info.
 plutil -lint "${CONTENTS}/Info.plist" "${WIDGET_CONTENTS}/Info.plist"
 
 test "$(plutil -extract NSExtension.NSExtensionPointIdentifier raw "${WIDGET_CONTENTS}/Info.plist")" = "com.apple.widgetkit-extension"
+test "$(plutil -extract NSExtension.NSExtensionPrincipalClass raw "${WIDGET_CONTENTS}/Info.plist")" = "MacroPulseWidget.MacroPulseWidget"
 test "$(plutil -extract CFBundleURLTypes.0.CFBundleURLSchemes.0 raw "${CONTENTS}/Info.plist")" = "macropulse"
 
 ICONSET="${BUILD_ROOT}/AppIcon.iconset"

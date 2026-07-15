@@ -906,3 +906,81 @@ html.native-macos-app .footer {
     background: var(--paper-raised);
   }
 }
+
+
+/* Keep the release-card glow inside its rounded compositor surface. */
+html.native-macos-app .hero-focus {
+  isolation: isolate;
+  contain: paint;
+}
+
+html.native-macos-app .hero-focus::before {
+  inset: 0;
+  top: auto;
+  right: auto;
+  width: auto;
+  height: auto;
+  border-radius: inherit;
+  background: radial-gradient(circle at 100% 0, rgba(86, 166, 255, .18), transparent 42%);
+  filter: none;
+}
+
+/* Native Mac windows use centered dialogs at every window width. */
+html.native-macos-app .side-column.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  place-items: center;
+  padding:
+    max(18px, env(safe-area-inset-top))
+    max(18px, env(safe-area-inset-right))
+    max(18px, env(safe-area-inset-bottom))
+    max(18px, env(safe-area-inset-left));
+  overflow: hidden;
+}
+
+html.native-macos-app .side-column.modal-backdrop > .editorial-panel {
+  box-sizing: border-box;
+  width: min(680px, 100%);
+  max-height: calc(100dvh - 36px);
+  border-width: 1px;
+  border-top-width: 5px;
+  border-radius: 28px;
+  padding: 30px;
+  scrollbar-gutter: stable;
+}
+
+html.native-macos-app .side-column.modal-backdrop > .editorial-panel .panel-head {
+  min-width: 0;
+  padding-right: 58px;
+}
+
+html.native-macos-app .side-column.modal-backdrop > .editorial-panel .panel-code {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  html.native-macos-app .side-column.modal-backdrop {
+    place-items: center;
+    padding:
+      max(14px, env(safe-area-inset-top))
+      max(14px, env(safe-area-inset-right))
+      max(14px, env(safe-area-inset-bottom))
+      max(14px, env(safe-area-inset-left));
+  }
+
+  html.native-macos-app .side-column.modal-backdrop > .editorial-panel {
+    width: min(680px, 100%);
+    max-height: calc(100dvh - 28px);
+    border-width: 1px;
+    border-top-width: 5px;
+    border-radius: 24px;
+    padding: 27px 20px;
+  }
+
+  html.native-macos-app .side-column.modal-backdrop > .editorial-panel .panel-head {
+    padding-right: 52px;
+  }
+}

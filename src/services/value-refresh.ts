@@ -1,4 +1,4 @@
-import { fetchBlsEventValues, fetchUmichEventValues } from "../providers/release-values";
+import { fetchBlsEventValues, fetchIsmEventValues, fetchUmichEventValues } from "../providers/release-values";
 import { fetchEiaEventValues } from "../providers/eia";
 import { listEventsMissingValues, setOfficialEventValues, type EventValueCandidate } from "../repositories/events";
 import type { Env, ProviderName } from "../types";
@@ -60,6 +60,8 @@ export async function refreshDueEventValues(env: Env, now = new Date(), options:
           ? await fetchUmichEventValues(events, fetchedAt)
           : provider === "eia"
             ? await fetchEiaEventValues(events, fetchedAt)
+            : provider === "ism"
+              ? await fetchIsmEventValues(events, fetchedAt)
             : new Map();
       for (const event of events) {
         const value = values.get(event.id);

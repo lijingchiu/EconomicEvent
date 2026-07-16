@@ -47,8 +47,9 @@ export async function listEvents(db: D1Database, filter: EventFilter): Promise<R
   return result.results;
 }
 
-const BLS_VALUE_NAMES = ["Inflation Rate MoM", "Core Inflation Rate MoM", "Inflation Rate YoY", "Core Inflation Rate YoY", "PPI MoM", "Non Farm Payrolls", "Unemployment Rate"];
+const BLS_VALUE_NAMES = ["Inflation Rate MoM", "Core Inflation Rate MoM", "Inflation Rate YoY", "Core Inflation Rate YoY", "PPI MoM", "Non Farm Payrolls", "Unemployment Rate", "JOLTs Job Openings"];
 const EIA_VALUE_NAMES = ["Weekly Petroleum Status Report", "Crude Oil Inventories", "Gasoline Inventories", "Distillate Inventories", "Natural Gas Storage"];
+const ISM_VALUE_NAMES = ["ISM Manufacturing PMI", "ISM Services PMI"];
 
 export async function listEventsMissingValues(db: D1Database, fromUtc: string, toUtc: string): Promise<EventValueCandidate[]> {
   const result = await db.prepare(`SELECT id, provider, name, event_time_utc AS eventTimeUtc
@@ -58,10 +59,11 @@ export async function listEventsMissingValues(db: D1Database, fromUtc: string, t
         (provider = 'bls' AND name IN (${BLS_VALUE_NAMES.map(() => "?").join(", ")}))
         OR provider = 'umich'
         OR (provider = 'eia' AND name IN (${EIA_VALUE_NAMES.map(() => "?").join(", ")}))
+        OR (provider = 'ism' AND name IN (${ISM_VALUE_NAMES.map(() => "?").join(", ")}))
       )
       AND event_time_utc >= ?
       AND event_time_utc <= ?
-    ORDER BY event_time_utc ASC`).bind(...BLS_VALUE_NAMES, ...EIA_VALUE_NAMES, fromUtc, toUtc).all<EventValueCandidate>();
+    ORDER BY event_time_utc ASC`).bind(...BLS_VALUE_NAMES, ...EIA_VALUE_NAMES, ...ISM_VALUE_NAMES, fromUtc, toUtc).all<EventValueCandidate>();
   return result.results;
 }
 

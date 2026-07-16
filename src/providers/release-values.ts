@@ -4,6 +4,8 @@ import { fetchWithTimeout, readBodyWithLimit } from "../utils/fetch-with-timeout
 
 export const BLS_API_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/";
 export const UMICH_VALUES_URL = "https://www.sca.isr.umich.edu/";
+export const ISM_MANUFACTURING_VALUES_URL = "https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/pmi/";
+export const ISM_SERVICES_VALUES_URL = "https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/services/";
 
 const USER_AGENT = "EconomicEventBot/1.0 (+https://github.com/lijingchiu/EconomicEvent)";
 
@@ -34,6 +36,7 @@ const BLS_SERIES_BY_METRIC: Record<string, string[]> = {
   "PPI MoM": ["WPSFD4"],
   "Non Farm Payrolls": ["CES0000000001"],
   "Unemployment Rate": ["LNS14000000"],
+  "JOLTs Job Openings": ["JTS00000000JOL"],
 };
 
 function zonedYearMonth(iso: string): YearMonth {
@@ -106,6 +109,13 @@ function metricValue(name: string, series: Map<string, Map<string, number>>, per
       previousValue: earlierLevel == null ? null : String(Math.round(priorLevel - earlierLevel)),
       valueUnit: "K",
     };
+  }
+
+  if (name === "JOLTs Job Openings") {
+    const actual = valueAt(values, period);
+    if (actual == null) return null;
+    const prior = valueAt(values, previous);
+    return { actualValue: String(Math.round(actual)), previousValue: prior == null ? null : String(Math.round(prior)), valueUnit: "K" };
   }
 
   const yearOverYear = name.endsWith("YoY");
@@ -186,6 +196,55 @@ export async function fetchUmichEventValues(events: ReleaseValueEvent[], fetched
   const values = new Map<string, ReleaseValue>();
   for (const event of events) {
     const value = parseUmichEventValue(event, html, fetchedAt);
+    if (value) values.set(event.id, value);
+  }
+  return values;
+}
+
+function ismValuesUrl(event: ReleaseValueEvent): string {
+  const period = shiftMonth(zonedYearMonth(event.eventTimeUtc), -1);
+  const month = MONTHS[period.month - 1];
+  const baseUrl = event.name === "ISM Services PMI" ? ISM_SERVICES_VALUES_URL : ISM_MANUFACTURING_VALUES_URL;
+  return `${baseUrl}${month}/`;
+}
+
+function numericCell(value: string | undefined): number | undefined {
+  const match = /[-+]?\d+(?:\.\d+)?/.exec((value ?? "").replace(/,/g, ""));
+  if (!match) return undefined;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+export function parseIsmEventValue(event: ReleaseValueEvent, html: string, fetchedAt: string, valueSourceUrl = ismValuesUrl(event)): ReleaseValue | null {
+  const label = event.name === "ISM Services PMI" ? "Services" : event.name === "ISM Manufacturing PMI" ? "Manufacturing" : null;
+  if (!label) return null;
+  const row = parseHtmlTableRows(html).find((cells) => new RegExp(`^${label}\\s+PMI\\b`, "i").test(cells[0]?.replace(/\s+/g, " ").trim() ?? ""));
+  const actual = numericCell(row?.[1]);
+  const prior = numericCell(row?.[2]);
+  if (actual == null) throw new Error(`${label} PMI value was not found`);
+  return {
+    actualValue: oneDecimal(actual),
+    previousValue: prior == null ? null : oneDecimal(prior),
+    valueUnit: "%",
+    valueSourceUrl,
+    sourceUpdatedAt: fetchedAt,
+  };
+}
+
+export async function fetchIsmEventValues(events: ReleaseValueEvent[], fetchedAt = new Date().toISOString()): Promise<Map<string, ReleaseValue>> {
+  if (!events.length) return new Map();
+  const htmlByUrl = new Map<string, string>();
+  const values = new Map<string, ReleaseValue>();
+  for (const event of events) {
+    const valueSourceUrl = ismValuesUrl(event);
+    let html = htmlByUrl.get(valueSourceUrl);
+    if (html == null) {
+      const response = await fetchWithTimeout(valueSourceUrl, { headers: { accept: "text/html,application/xhtml+xml", "user-agent": USER_AGENT } });
+      html = await readBodyWithLimit(response);
+      if (!response.ok) throw new Error(`ISM report page returned HTTP ${response.status}`);
+      htmlByUrl.set(valueSourceUrl, html);
+    }
+    const value = parseIsmEventValue(event, html, fetchedAt, valueSourceUrl);
     if (value) values.set(event.id, value);
   }
   return values;

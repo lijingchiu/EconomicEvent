@@ -5,6 +5,7 @@ import { BeaProvider } from "../../src/providers/bea";
 import { FederalReserveProvider } from "../../src/providers/federal-reserve";
 import { EiaProvider } from "../../src/providers/eia";
 import { fetchEiaEventValues } from "../../src/providers/eia";
+import { fetchBlsEventValues, fetchIsmEventValues } from "../../src/providers/release-values";
 import { CensusProvider } from "../../src/providers/census";
 import { IsmProvider } from "../../src/providers/ism";
 import { UmichProvider } from "../../src/providers/umich";
@@ -35,6 +36,23 @@ describe("official provider adapters", () => {
     expect(result.events.map((event) => event.name)).toEqual(["Inflation Rate MoM", "Core Inflation Rate MoM", "Inflation Rate YoY", "Core Inflation Rate YoY"]);
     expect(result.events[0].eventTimeUtc).toBe("2026-07-14T12:30:00.000Z");
     expect(result.warnings).toEqual([]);
+  });
+
+  it("fetches official BLS JOLTS levels as Actual and Prior", async () => {
+    mockFetch({
+      "api.bls.gov": {
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "REQUEST_SUCCEEDED",
+          Results: { series: [{ seriesID: "JTS00000000JOL", data: [
+            { year: "2026", period: "M06", value: "7594" },
+            { year: "2026", period: "M05", value: "7620" },
+          ] }] },
+        }),
+      },
+    });
+    const values = await fetchBlsEventValues([{ id: "jolts", name: "JOLTs Job Openings", eventTimeUtc: "2026-07-07T14:00:00.000Z" }], env);
+    expect(values.get("jolts")).toMatchObject({ actualValue: "7594", previousValue: "7620", valueUnit: "K" });
   });
 
   it("parses BEA public JSON release dates", async () => {
@@ -100,6 +118,19 @@ describe("official provider adapters", () => {
     const result = await new IsmProvider().fetchEvents(range, env);
     expect(result.events.map((event) => event.name)).toEqual(["ISM Manufacturing PMI", "ISM Services PMI", "ISM Manufacturing PMI", "ISM Services PMI"]);
     expect(result.events[2].eventTimeUtc).toBe("2026-08-03T14:00:00.000Z");
+  });
+
+  it("fetches official ISM PMI Actual and Prior values", async () => {
+    mockFetch({
+      "/pmi/june/": { body: read("test/fixtures/ism/manufacturing-june.html") },
+      "/services/june/": { body: read("test/fixtures/ism/services-june.html") },
+    });
+    const values = await fetchIsmEventValues([
+      { id: "ism-manufacturing", name: "ISM Manufacturing PMI", eventTimeUtc: "2026-07-01T14:00:00.000Z" },
+      { id: "ism-services", name: "ISM Services PMI", eventTimeUtc: "2026-07-06T14:00:00.000Z" },
+    ]);
+    expect(values.get("ism-manufacturing")).toMatchObject({ actualValue: "53.3", previousValue: "54.0", valueUnit: "%" });
+    expect(values.get("ism-services")).toMatchObject({ actualValue: "54.0", previousValue: "54.5", valueUnit: "%" });
   });
 
   it("builds Michigan preliminary and final dates from the official release schedule", async () => {

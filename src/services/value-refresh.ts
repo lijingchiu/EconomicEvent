@@ -33,7 +33,9 @@ function groupEvents(events: RefreshCandidate[]): Map<string, RefreshCandidate[]
 
 function isScheduledAttempt(event: EventValueCandidate, now: Date): boolean {
   const minutesAfterRelease = Math.floor((now.getTime() - new Date(event.eventTimeUtc).getTime()) / 60_000);
-  return AUTOMATIC_RETRY_MINUTES.has(minutesAfterRelease);
+  // Retry every minute for two days so a transient source/parser failure is
+  // recovered without waiting for the next release cycle.
+  return minutesAfterRelease >= 0 && minutesAfterRelease <= 48 * 60 || AUTOMATIC_RETRY_MINUTES.has(minutesAfterRelease);
 }
 
 export async function refreshDueEventValues(env: Env, now = new Date(), options: RefreshOptions = {}): Promise<ValueRefreshSummary> {

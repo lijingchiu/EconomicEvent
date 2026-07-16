@@ -6,7 +6,7 @@ import { FederalReserveProvider } from "../../src/providers/federal-reserve";
 import { EiaProvider } from "../../src/providers/eia";
 import { fetchEiaEventValues } from "../../src/providers/eia";
 import { fetchBlsEventValues, fetchIsmEventValues, fetchUmichEventValues } from "../../src/providers/release-values";
-import { fetchCensusEventValues } from "../../src/providers/census-values";
+import { fetchCensusEventValues, parseCensusRetailRelease } from "../../src/providers/census-values";
 import { CensusProvider } from "../../src/providers/census";
 import { IsmProvider } from "../../src/providers/ism";
 import { UmichProvider } from "../../src/providers/umich";
@@ -131,6 +131,14 @@ describe("official provider adapters", () => {
     ], "2026-07-16T00:00:00.000Z");
     expect(values.get("future-permits")).toMatchObject({ actualValue: null, previousValue: "1,413,000", valueUnit: "units" });
     expect(values.get("future-starts")).toMatchObject({ actualValue: null, previousValue: "1,177,000", valueUnit: "units" });
+  });
+
+  it("parses Census Retail Sales Actual and Prior after release", async () => {
+    const snapshot = parseCensusRetailRelease(read("test/fixtures/census/retail-current.html"));
+    expect(snapshot).toMatchObject({ releaseDate: "2026-07-16", actualValue: "0.2", previousValue: "1.0" });
+    mockFetch({ "/retail/sales.html": { body: read("test/fixtures/census/retail-current.html") } });
+    const values = await fetchCensusEventValues([{ id: "retail", name: "Retail Sales MoM", eventTimeUtc: "2026-07-16T12:30:00.000Z" }], "2026-07-16T13:00:00.000Z");
+    expect(values.get("retail")).toMatchObject({ actualValue: "0.2", previousValue: "1.0", valueUnit: "%" });
   });
 
   it("uses the latest Michigan release as Prior for a future preliminary event", async () => {

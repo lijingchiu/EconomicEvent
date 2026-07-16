@@ -72,10 +72,11 @@ export async function listEventsMissingValues(db: D1Database, fromUtc: string, t
         OR provider = 'umich'
         OR (provider = 'eia' AND name IN (${EIA_VALUE_NAMES.map(() => "?").join(", ")}))
         OR (provider = 'ism' AND name IN (${ISM_VALUE_NAMES.map(() => "?").join(", ")}))
+        OR (provider = 'census' AND name IN (${CENSUS_VALUE_NAMES.map(() => "?").join(", ")}))
       )
       AND event_time_utc >= ?
       AND event_time_utc <= ?
-    ORDER BY event_time_utc ASC`).bind(...BLS_VALUE_NAMES, ...EIA_VALUE_NAMES, ...ISM_VALUE_NAMES, fromUtc, toUtc).all<EventValueCandidate>();
+    ORDER BY event_time_utc ASC`).bind(...BLS_VALUE_NAMES, ...EIA_VALUE_NAMES, ...ISM_VALUE_NAMES, ...CENSUS_VALUE_NAMES, fromUtc, toUtc).all<EventValueCandidate>();
   return result.results;
 }
 

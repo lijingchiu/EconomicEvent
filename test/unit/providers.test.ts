@@ -78,10 +78,12 @@ describe("official provider adapters", () => {
       "wngsr.json": { body: read("test/fixtures/eia/wngsr.json"), contentType: "application/json; charset=utf-8" },
     });
     const values = await fetchEiaEventValues([
+      { id: "wpsr-legacy", name: "Weekly Petroleum Status Report", eventTimeUtc: "2026-07-15T14:30:00.000Z" },
       { id: "wpsr-crude", name: "Crude Oil Inventories", eventTimeUtc: "2026-07-15T14:30:00.000Z" },
       { id: "wpsr-gasoline", name: "Gasoline Inventories", eventTimeUtc: "2026-07-15T14:30:00.000Z" },
       { id: "wngsr-storage", name: "Natural Gas Storage", eventTimeUtc: "2026-07-09T14:30:00.000Z" },
     ]);
+    expect(values.get("wpsr-legacy")?.actualValue).toBe("726.2");
     expect(values.get("wpsr-crude")?.actualValue).toBe("726.2");
     expect(values.get("wpsr-gasoline")?.previousValue).toBe("212.1");
     expect(values.get("wngsr-storage")?.actualValue).toBe("2,983");

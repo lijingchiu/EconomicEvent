@@ -34,7 +34,9 @@ function isScheduledAttempt(event: EventValueCandidate, now: Date): boolean {
 }
 
 export async function refreshDueEventValues(env: Env, now = new Date(), options: RefreshOptions = {}): Promise<ValueRefreshSummary> {
-  const fromUtc = new Date(now.getTime() - (options.force ? 24 * 60 : 31) * 60_000).toISOString();
+  // Keep a recovery window so a delayed deploy or missed Cron does not leave
+  // an official release permanently stuck without values.
+  const fromUtc = new Date(now.getTime() - (options.force ? 7 * 86_400_000 : 48 * 60 * 60_000)).toISOString();
   const candidates = await listEventsMissingValues(env.DB, fromUtc, now.toISOString());
   const due = options.force ? candidates : candidates.filter((event) => isScheduledAttempt(event, now));
   const groups = groupEvents(due);

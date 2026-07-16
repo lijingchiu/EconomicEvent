@@ -48,7 +48,7 @@ export async function listEvents(db: D1Database, filter: EventFilter): Promise<R
 }
 
 const BLS_VALUE_NAMES = ["Inflation Rate MoM", "Core Inflation Rate MoM", "Inflation Rate YoY", "Core Inflation Rate YoY", "PPI MoM", "Non Farm Payrolls", "Unemployment Rate"];
-const EIA_VALUE_NAMES = ["Crude Oil Inventories", "Gasoline Inventories", "Distillate Inventories", "Natural Gas Storage"];
+const EIA_VALUE_NAMES = ["Weekly Petroleum Status Report", "Crude Oil Inventories", "Gasoline Inventories", "Distillate Inventories", "Natural Gas Storage"];
 
 export async function listEventsMissingValues(db: D1Database, fromUtc: string, toUtc: string): Promise<EventValueCandidate[]> {
   const result = await db.prepare(`SELECT id, provider, name, event_time_utc AS eventTimeUtc

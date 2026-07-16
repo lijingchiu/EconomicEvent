@@ -147,6 +147,8 @@ export type EiaReleaseValue = {
 
 export type EiaReleaseEvent = Pick<EconomicEvent, "id" | "name" | "eventTimeUtc">;
 
+const WPSR_RELEASE_NAME = "Weekly Petroleum Status Report";
+
 function parseEiaDate(value: string): string {
   const trimmed = value.trim();
   const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(trimmed);
@@ -187,8 +189,11 @@ export async function fetchEiaEventValues(events: EiaReleaseEvent[], fetchedAt =
       if (metric) values.set(event.id, metric.values);
       continue;
     }
-    if ((event.name === "Crude Oil Inventories" || event.name === "Gasoline Inventories" || event.name === "Distillate Inventories") && wpsr?.releaseDate === localDate) {
-      const metric = wpsr.metrics[event.name];
+    if ((event.name === WPSR_RELEASE_NAME || event.name === "Crude Oil Inventories" || event.name === "Gasoline Inventories" || event.name === "Distillate Inventories") && wpsr?.releaseDate === localDate) {
+      // Older D1 rows stored the whole WPSR as one release-level event. Keep
+      // those rows backfillable by using crude oil as the release headline.
+      const metricName = event.name === WPSR_RELEASE_NAME ? "Crude Oil Inventories" : event.name;
+      const metric = wpsr.metrics[metricName];
       if (metric) values.set(event.id, metric.values);
     }
   }
@@ -315,7 +320,9 @@ export class EiaProvider implements EconomicCalendarProvider {
             const metricSnapshot = snapshot?.releaseDate === local.date ? snapshot.metrics[metricName] : undefined;
             const built = await eventFromRelease({
               provider: "eia",
-              providerEventId: `${source.id}-${metricName}-${local.date}`,
+              providerEventId: source.id === "wpsr" && metricName === "Crude Oil Inventories"
+                ? `${source.id}-${local.date}`
+                : `${source.id}-${metricName}-${local.date}`,
               sourceUrl: source.url,
               name: metricName,
               eventTimeUtc,
@@ -336,7 +343,9 @@ export class EiaProvider implements EconomicCalendarProvider {
             const metricSnapshot = snapshot?.releaseDate === exception.date ? snapshot.metrics[metricName] : undefined;
             const built = await eventFromRelease({
               provider: "eia",
-              providerEventId: `${source.id}-${metricName}-${exception.date}-holiday`,
+              providerEventId: source.id === "wpsr" && metricName === "Crude Oil Inventories"
+                ? `${source.id}-${exception.date}`
+                : `${source.id}-${metricName}-${exception.date}-holiday`,
               sourceUrl: source.url,
               name: metricName,
               eventTimeUtc,

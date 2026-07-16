@@ -74,18 +74,18 @@ const DASHBOARD_HTML = `<!doctype html>
     button,input,select{font:inherit}button{cursor:pointer}.hidden{display:none!important}
     .app-shell{min-height:100vh}
     .site-header{position:sticky;top:0;z-index:20;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--paper) 90%,transparent);backdrop-filter:blur(18px)}
-    .header-inner{width:min(1440px,calc(100% - 64px));margin:auto;min-height:76px;display:flex;align-items:center;gap:22px}
+    .header-inner{width:min(1440px,calc(100% - 64px));margin:auto;min-height:76px;display:flex;align-items:center;gap:18px}
     .brand{display:flex;align-items:center;gap:12px;min-width:260px}
     .brand-icon{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;background:var(--ink);box-shadow:0 8px 20px rgba(0,0,0,.12)}
     .brand-icon svg{width:24px;height:24px}
     .brand-copy strong{display:block;font:700 13px/1 var(--serif);letter-spacing:.16em}
     .brand-copy small{display:block;margin-top:7px;color:var(--muted);font:600 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase}
-    .nav{display:flex;align-items:center;gap:4px;margin-right:auto;flex-wrap:wrap}
+    .nav{display:flex;align-items:center;gap:4px;margin-right:auto;flex-wrap:nowrap;white-space:nowrap}
     .nav button{border:0;background:transparent;color:var(--muted);padding:9px 10px;font-size:12px;letter-spacing:.05em;position:relative}
     .nav button:after{content:"";position:absolute;left:10px;right:10px;bottom:4px;height:1px;background:var(--accent);transform:scaleX(0);transition:transform .2s}
     .nav button:hover,.nav button.active{color:var(--ink)}
     .nav button.active:after{transform:scaleX(1)}
-    .header-tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    .header-tools{display:flex;align-items:center;gap:10px;flex-wrap:nowrap;white-space:nowrap}
     .online{display:flex;align-items:center;gap:7px;color:var(--muted);font:600 10px/1 var(--mono);letter-spacing:.06em;white-space:nowrap}
     .dot{width:7px;height:7px;border-radius:50%;background:var(--positive);box-shadow:0 0 0 4px var(--positive-soft)}
     .theme-switcher{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;padding:3px;border:1px solid var(--line);border-radius:999px;background:var(--paper-3)}
@@ -228,6 +228,15 @@ const DASHBOARD_HTML = `<!doctype html>
     .login-error{min-height:17px;color:var(--danger);font-size:10px;margin-top:9px}
     .login-theme{position:absolute;top:22px;right:22px}
     .login-language{position:absolute;top:22px;left:22px}
+    @media(max-width:1180px) and (min-width:761px){
+      .header-inner{width:min(100%,calc(100% - 32px));gap:10px}
+      .brand{min-width:220px}
+      .nav{gap:0}
+      .nav button{padding-left:7px;padding-right:7px}
+      .header-tools{gap:5px}
+      .online{font-size:9px}
+      .time-chip{padding-left:8px;padding-right:8px}
+    }
     @keyframes reveal{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
     @media(max-width:760px){
       .site-header{position:sticky}

@@ -19,6 +19,13 @@ describe("Discord webhook", () => {
     expect(unknown.allowed_mentions).toEqual({ parse: [] });
   });
 
+  it("formats post-release values as a result instead of a negative reminder", () => {
+    const payload = buildEventPayload({ ...event, actualValue: "0.2", previousValue: "1.0", valueUnit: "%" }, -1, { DB: {} as D1Database });
+    expect(payload.embeds[0].title).toContain("數據公布");
+    expect(payload.embeds[0].description).toContain("已公布");
+    expect(payload.embeds[0].description).not.toContain("-1 分鐘");
+  });
+
   it("accepts 200, 204 and retries 500/429", async () => {
     const responses = [new Response(JSON.stringify({ id: "m1" }), { status: 200 }), new Response(null, { status: 204 })];
     const fetcher = vi.fn(async () => responses.shift() ?? new Response(null, { status: 204 }));

@@ -8,7 +8,8 @@ function rowToEvent(row: Record<string, unknown>): EconomicEvent {
 
 export async function expireOldDeliveries(db: D1Database, now: string, windowMinutes = 3): Promise<number> {
   const threshold = new Date(new Date(now).getTime() - windowMinutes * 60_000).toISOString();
-  const result = await db.prepare("UPDATE notification_deliveries SET status='expired', updated_at=? WHERE status IN ('pending','retry') AND scheduled_for_utc <= ?").bind(now, threshold).run();
+  const resultThreshold = new Date(new Date(now).getTime() - 60 * 60_000).toISOString();
+  const result = await db.prepare("UPDATE notification_deliveries SET status='expired', updated_at=? WHERE status IN ('pending','retry') AND ((reminder_minutes = -1 AND scheduled_for_utc <= ?) OR (reminder_minutes >= 0 AND scheduled_for_utc <= ?))").bind(now, resultThreshold, threshold).run();
   return result.meta.changes;
 }
 
@@ -20,10 +21,13 @@ export async function releaseStaleSending(db: D1Database, now: string, staleMinu
 
 export async function findDueDeliveries(db: D1Database, now: string, windowMinutes = 3, impactFilter: Impact = "high"): Promise<DueDelivery[]> {
   const threshold = new Date(new Date(now).getTime() - windowMinutes * 60_000).toISOString();
+  const resultThreshold = new Date(new Date(now).getTime() - 60 * 60_000).toISOString();
   const impacts: Impact[] = impactFilter === "high" ? ["high"] : impactFilter === "medium" ? ["high", "medium"] : ["high", "medium", "low"];
   const result = await db.prepare(`SELECT d.id, d.event_id AS eventId, d.reminder_minutes AS reminderMinutes, d.attempts, e.provider, e.provider_event_id AS providerEventId, e.source_url AS sourceUrl, e.name, e.normalized_name AS normalizedName, e.category, e.event_time_utc AS eventTimeUtc, e.local_display_timezone AS localDisplayTimezone, e.impact, e.affected_markets_json AS affectedMarketsJson, e.description, e.actual_value AS actualValue, e.forecast_value AS forecastValue, e.previous_value AS previousValue, e.value_unit AS valueUnit, e.value_source_url AS valueSourceUrl, e.source_updated_at AS sourceUpdatedAt, e.raw_hash AS rawHash
     FROM notification_deliveries d JOIN economic_events e ON e.id=d.event_id
-    WHERE d.status IN ('pending','retry') AND d.scheduled_for_utc <= ? AND d.scheduled_for_utc > ? AND e.event_time_utc > ? AND e.impact IN (${impacts.map(() => "?").join(",")}) ORDER BY d.scheduled_for_utc ASC LIMIT 100`).bind(now, threshold, now, ...impacts).all<Record<string, unknown>>();
+    WHERE d.status IN ('pending','retry') AND d.scheduled_for_utc <= ?
+      AND ((d.reminder_minutes = -1 AND d.scheduled_for_utc > ?) OR (d.reminder_minutes >= 0 AND d.scheduled_for_utc > ? AND e.event_time_utc > ?))
+      AND e.impact IN (${impacts.map(() => "?").join(",")}) ORDER BY d.scheduled_for_utc ASC LIMIT 100`).bind(now, resultThreshold, threshold, now, ...impacts).all<Record<string, unknown>>();
   return result.results.map((row) => ({ id: Number(row.id), eventId: String(row.eventId), reminderMinutes: Number(row.reminderMinutes), attempts: Number(row.attempts), event: rowToEvent(row) }));
 }
 

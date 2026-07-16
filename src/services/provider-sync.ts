@@ -9,7 +9,7 @@ import { log, logError } from "../utils/logger";
 export async function syncProviders(env: Env, requestedProviders?: ProviderName[], options: { now?: Date; full?: boolean } = {}): Promise<ProviderSyncSummary[]> {
   const config = await getRuntimeConfig(env);
   const now = options.now ?? new Date();
-  const fromUtc = now;
+  const fromUtc = new Date(now.getTime() - (options.full ? 7 : 2) * 86_400_000);
   const toUtc = new Date(now.getTime() + config.syncDaysAhead * 86_400_000);
   const allowed = new Set(requestedProviders?.length ? requestedProviders : config.enabledProviders);
   const providers = createProviders().filter((provider) => config.enabledProviders.includes(provider.name) && allowed.has(provider.name));

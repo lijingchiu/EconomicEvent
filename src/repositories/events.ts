@@ -22,6 +22,25 @@ export type EventPriorUpdate = {
   sourceUpdatedAt: string;
 };
 
+export async function latestOfficialActual(db: D1Database, event: EventValueCandidate): Promise<EventPriorUpdate | null> {
+  const compatibleNames = event.provider === "eia" && event.name === "Crude Oil Inventories"
+    ? [event.name, "Weekly Petroleum Status Report"]
+    : [event.name];
+  const row = await db.prepare(`SELECT actual_value AS previousValue, value_unit AS valueUnit,
+      COALESCE(value_source_url, source_url) AS valueSourceUrl,
+      COALESCE(source_updated_at, event_time_utc) AS sourceUpdatedAt
+    FROM economic_events
+    WHERE provider = ? AND name IN (${compatibleNames.map(() => "?").join(",")}) AND event_time_utc < ? AND actual_value IS NOT NULL
+    ORDER BY event_time_utc DESC LIMIT 1`).bind(event.provider, ...compatibleNames, event.eventTimeUtc).first<Record<string, unknown>>();
+  if (!row?.previousValue) return null;
+  return {
+    previousValue: String(row.previousValue),
+    valueUnit: row.valueUnit == null ? null : String(row.valueUnit),
+    valueSourceUrl: String(row.valueSourceUrl),
+    sourceUpdatedAt: String(row.sourceUpdatedAt),
+  };
+}
+
 export async function upsertEconomicEvent(db: D1Database, event: EconomicEvent, config: AppConfig): Promise<"inserted" | "updated"> {
   const existing = await db.prepare("SELECT id, created_at, event_time_utc FROM economic_events WHERE id = ?").bind(event.id).first<{ id: string; created_at: string; event_time_utc: string }>();
   const now = new Date().toISOString();
@@ -35,8 +54,14 @@ export async function upsertEconomicEvent(db: D1Database, event: EconomicEvent, 
 }
 
 export async function ensureReminderDeliveries(db: D1Database, event: EconomicEvent, reminderMinutes: number[], now = new Date().toISOString()): Promise<void> {
+  if (reminderMinutes.length) {
+    await db.prepare(`DELETE FROM notification_deliveries
+      WHERE event_id = ? AND reminder_minutes >= 0 AND status IN ('pending','retry')
+        AND reminder_minutes NOT IN (${reminderMinutes.map(() => "?").join(",")})`).bind(event.id, ...reminderMinutes).run();
+  }
   const schedule = reminderSchedule(event.eventTimeUtc, reminderMinutes);
   for (const item of schedule) {
+    if (item.scheduledForUtc <= now) continue;
     await db.prepare(`INSERT INTO notification_deliveries (event_id, reminder_minutes, scheduled_for_utc, status, attempts, created_at, updated_at)
       VALUES (?, ?, ?, 'pending', 0, ?, ?)
       ON CONFLICT(event_id, reminder_minutes) DO UPDATE SET scheduled_for_utc=excluded.scheduled_for_utc, updated_at=excluded.updated_at
@@ -50,7 +75,8 @@ export async function listEvents(db: D1Database, filter: EventFilter): Promise<R
   if (filter.provider) { conditions.push("provider = ?"); values.push(filter.provider); }
   if (filter.category) { conditions.push("category = ?"); values.push(filter.category); }
   if (filter.impact) { conditions.push("impact = ?"); values.push(filter.impact); }
-  const limit = Math.min(Math.max(filter.limit ?? 30, 1), 200);
+  const requestedLimit = Number(filter.limit ?? 30);
+  const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 200) : 30;
   const result = await db.prepare(`SELECT id, provider, provider_event_id AS providerEventId, source_url AS sourceUrl, name, normalized_name AS normalizedName, category, country, currency, event_time_utc AS eventTimeUtc, local_display_timezone AS localDisplayTimezone, impact, affected_markets_json AS affectedMarketsJson, description, actual_value AS actualValue, forecast_value AS forecastValue, previous_value AS previousValue, value_unit AS valueUnit, value_source_url AS valueSourceUrl, source_updated_at AS sourceUpdatedAt, raw_hash AS rawHash, created_at AS createdAt, updated_at AS updatedAt FROM economic_events WHERE ${conditions.join(" AND ")} ORDER BY event_time_utc ASC LIMIT ?`).bind(...values, limit).all<Record<string, unknown>>();
   return result.results.map((row) => ({
     ...row,

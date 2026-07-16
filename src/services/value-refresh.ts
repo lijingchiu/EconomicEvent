@@ -1,11 +1,9 @@
 import { fetchBlsEventValues, fetchIsmEventValues, fetchUmichEventValues } from "../providers/release-values";
 import { fetchEiaEventValues } from "../providers/eia";
 import { fetchCensusEventValues } from "../providers/census-values";
-import { listEventsMissingPriors, listEventsMissingValues, setOfficialEventPrior, setOfficialEventValues, type EventValueCandidate } from "../repositories/events";
+import { latestOfficialActual, listEventsMissingPriors, listEventsMissingValues, setOfficialEventPrior, setOfficialEventValues, type EventValueCandidate } from "../repositories/events";
 import type { Env, ProviderName } from "../types";
 import { log, logError } from "../utils/logger";
-
-const AUTOMATIC_RETRY_MINUTES = new Set([0, 1, 2, 3, 5, 8, 12, 20, 30]);
 
 export type ValueRefreshSummary = {
   checkedEvents: number;
@@ -35,7 +33,7 @@ function isScheduledAttempt(event: EventValueCandidate, now: Date): boolean {
   const minutesAfterRelease = Math.floor((now.getTime() - new Date(event.eventTimeUtc).getTime()) / 60_000);
   // Retry every minute for two days so a transient source/parser failure is
   // recovered without waiting for the next release cycle.
-  return minutesAfterRelease >= 0 && minutesAfterRelease <= 48 * 60 || AUTOMATIC_RETRY_MINUTES.has(minutesAfterRelease);
+  return minutesAfterRelease >= 0 && minutesAfterRelease <= 48 * 60;
 }
 
 export async function refreshDueEventValues(env: Env, now = new Date(), options: RefreshOptions = {}): Promise<ValueRefreshSummary> {
@@ -55,12 +53,23 @@ export async function refreshDueEventValues(env: Env, now = new Date(), options:
     if (existing) existing.needsPrior = true;
     else merged.set(event.id, { ...event, needsActual: false, needsPrior: true });
   }
+  let historicalUpdates = 0;
+  for (const [id, event] of merged) {
+    if (event.needsPrior) {
+      const historical = await latestOfficialActual(env.DB, event);
+      if (historical && await setOfficialEventPrior(env.DB, event.id, historical)) {
+        event.needsPrior = false;
+        historicalUpdates += 1;
+      }
+    }
+    if (!event.needsActual && !event.needsPrior) merged.delete(id);
+  }
   const eligible = [...merged.values()];
   const groups = groupEvents(eligible);
   const summary: ValueRefreshSummary = {
     checkedEvents: eligible.length,
     attemptedSources: groups.size,
-    updatedEvents: 0,
+    updatedEvents: historicalUpdates,
     unavailableEvents: 0,
     failedEvents: 0,
     errors: [],

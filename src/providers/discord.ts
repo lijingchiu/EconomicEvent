@@ -28,12 +28,13 @@ function metricValue(value: string | null | undefined, unit: string | null | und
 
 export function buildEventPayload(event: EconomicEvent, reminderMinutes: number, env: Env): DiscordPayload {
   const mention = mentionPolicy(env.DISCORD_MENTION?.trim() ?? "");
+  const isResult = reminderMinutes === -1;
   const minutesText = reminderMinutes === 1 ? "1 分鐘" : `${reminderMinutes} 分鐘`;
   return {
     ...(mention.content ? { content: mention.content } : {}),
     embeds: [{
-      title: "📣 美國經濟事件提醒",
-      description: `${event.name} 將在 ${minutesText} 後公布。`,
+      title: isResult ? "📊 美國經濟數據公布" : "📣 美國經濟事件提醒",
+      description: isResult ? `${event.name} 已公布官方數值。` : `${event.name} 將在 ${minutesText} 後公布。`,
       color: COLORS[event.impact],
       fields: [
         { name: "事件", value: event.name, inline: false },
@@ -47,7 +48,7 @@ export function buildEventPayload(event: EconomicEvent, reminderMinutes: number,
         { name: "可能影響市場", value: event.affectedMarkets.map((market) => marketLabels[market]).join("、"), inline: false },
         { name: "資料來源", value: `${event.provider.toUpperCase()} — ${event.sourceUrl}`, inline: false },
       ],
-      footer: { text: "官方排程提醒；Actual / Forecast / Prior 會在資料源提供時顯示。" },
+      footer: { text: isResult ? "官方發布結果；Forecast 為市場共識，官方未提供時顯示 —。" : "官方排程提醒；Actual / Forecast / Prior 會在資料源提供時顯示。" },
       timestamp: event.eventTimeUtc,
     }],
     allowed_mentions: mention.allowed_mentions,

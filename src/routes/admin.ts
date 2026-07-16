@@ -40,9 +40,11 @@ export async function adminRoute(request: Request, env: Env, path: string): Prom
     }
     if (request.method === "GET" && path === "/admin/providers") return json({ providers: await listProviderHealth(env.DB), enabledProviders: (await getRuntimeConfig(env)).enabledProviders });
     if (request.method === "POST" && path === "/admin/sync") {
-      const body = await request.json().catch(() => ({})) as { providers?: ProviderName[] };
+      const body = await request.json().catch(() => ({})) as { providers?: unknown };
       const allowed = new Set(["bls", "bea", "federal_reserve", "eia", "census", "ism", "umich"]);
-      const providers = body.providers?.filter((provider) => allowed.has(provider)) as ProviderName[] | undefined;
+      const providers = Array.isArray(body.providers)
+        ? body.providers.filter((provider): provider is ProviderName => typeof provider === "string" && allowed.has(provider))
+        : undefined;
       return json({ summaries: await syncProviders(env, providers), valueRefresh: await refreshDueEventValues(env, new Date(), { force: true }) });
     }
     if (request.method === "POST" && path === "/admin/refresh-values") return json({ result: await refreshDueEventValues(env, new Date(), { force: true }) });

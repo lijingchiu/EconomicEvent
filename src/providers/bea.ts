@@ -9,6 +9,13 @@ function releaseRows(value: unknown): Array<Record<string, unknown>> {
   if (Array.isArray(value)) return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"));
   if (!value || typeof value !== "object") return [];
   const object = value as Record<string, unknown>;
+  const namedDates = Object.entries(object).flatMap(([release, item]) => {
+    if (!item || typeof item !== "object" || !Array.isArray((item as Record<string, unknown>).release_dates)) return [];
+    return ((item as Record<string, unknown>).release_dates as unknown[])
+      .filter((date): date is string => typeof date === "string")
+      .map((date) => ({ release, date, id: `${release}|${date}` }));
+  });
+  if (namedDates.length) return namedDates;
   for (const key of ["release_dates", "releaseDates", "data", "releases", "results"]) {
     const rows = releaseRows(object[key]);
     if (rows.length) return rows;
@@ -25,7 +32,7 @@ export class BeaProvider implements EconomicCalendarProvider {
   async fetchEvents(range: { fromUtc: Date; toUtc: Date }, env: Env, config?: AppConfig): Promise<ProviderFetchResult> {
     const fetchedAtUtc = new Date().toISOString();
     const warnings: ProviderWarning[] = [];
-    const events = [];
+    const events = new Map<string, NonNullable<Awaited<ReturnType<typeof eventFromRelease>>["event"]>>();
     try {
       const response = await fetchWithTimeout(URL, { headers: { accept: "application/json" } });
       const body = await readBodyWithLimit(response);
@@ -39,17 +46,18 @@ export class BeaProvider implements EconomicCalendarProvider {
         const providerEventId = stringField(row, ["id", "uid", "release_id", "releaseId"]);
         if (!date || !name) { warnings.push({ code: "missing_required_field", message: "BEA row missing date or release name", provider: this.name, sourceUrl: URL }); continue; }
         try {
-          const eventTimeUtc = dateAndTimeToUtc(date, time);
+          const eventTimeUtc = /T\d{2}:\d{2}/.test(date) ? new Date(date).toISOString() : dateAndTimeToUtc(date, time);
           if (!inRange(eventTimeUtc, range.fromUtc, range.toUtc)) continue;
           const baseId = providerEventId ?? `${date}|${name}`;
           for (const metricName of releaseMetricNames(name)) {
             const built = await eventFromRelease({ provider: "bea", providerEventId: metricProviderEventId(baseId, name, metricName), sourceUrl: URL, name: metricName, eventTimeUtc, description: name, sourceUpdatedAt: fetchedAtUtc, raw: { row, metricName } }, env, config);
-            if (built.event) events.push(built.event); else if (built.warning) warnings.push(built.warning);
+            if (built.event) events.set(built.event.id, built.event); else if (built.warning) warnings.push(built.warning);
           }
         } catch (error) { warnings.push({ code: "event_parse_failed", message: error instanceof Error ? error.message : "failed to parse BEA event", provider: this.name, sourceUrl: URL }); }
       }
       if (!rows.length) warnings.push({ code: "no_rows", message: "BEA JSON array was empty", provider: this.name, sourceUrl: URL });
     } catch (error) { warnings.push({ code: "source_fetch_failed", message: error instanceof Error ? error.message : "failed to fetch BEA release dates", provider: this.name, sourceUrl: URL }); }
-    return { provider: this.name, fetchedAtUtc, sourceUrl: URL, events, warnings };
+    if (!events.size && !warnings.length) warnings.push({ code: "no_events", message: "BEA release dates contained no tracked events in requested range", provider: this.name, sourceUrl: URL });
+    return { provider: this.name, fetchedAtUtc, sourceUrl: URL, events: [...events.values()], warnings };
   }
 }

@@ -6,7 +6,7 @@ import { FederalReserveProvider } from "../../src/providers/federal-reserve";
 import { EiaProvider } from "../../src/providers/eia";
 import { fetchEiaEventValues } from "../../src/providers/eia";
 import { fetchBlsEventValues, fetchIsmEventValues, fetchUmichEventValues } from "../../src/providers/release-values";
-import { fetchCensusEventValues, parseCensusRetailRelease } from "../../src/providers/census-values";
+import { fetchCensusEventValues, parseCensusDurableRelease, parseCensusRetailRelease } from "../../src/providers/census-values";
 import { CensusProvider } from "../../src/providers/census";
 import { IsmProvider } from "../../src/providers/ism";
 import { UmichProvider } from "../../src/providers/umich";
@@ -61,6 +61,16 @@ describe("official provider adapters", () => {
     const result = await new BeaProvider().fetchEvents(range, env);
     expect(result.events.map((event) => event.name)).toContain("GDP Growth Rate QoQ Adv");
     expect(result.events.find((event) => event.name === "GDP Growth Rate QoQ Adv")?.providerEventId).toBe("bea-gdp-2026-07-30|gdp-growth-rate-qoq-adv");
+  });
+
+  it("parses BEA's current named release date arrays", async () => {
+    mockFetch({ "release_dates.json": { contentType: "application/json", body: JSON.stringify({
+      "Gross Domestic Product": { release_dates: ["2026-07-30T12:30:00+00:00"] },
+      "Personal Income and Outlays": { release_dates: ["2026-07-30T12:30:00+00:00"] },
+    }) } });
+    const result = await new BeaProvider().fetchEvents(range, env);
+    expect(result.events.map((event) => event.name)).toEqual(expect.arrayContaining(["GDP Growth Rate QoQ", "Core PCE Price Index MoM", "Personal Income MoM", "Personal Spending MoM"]));
+    expect(result.events.every((event) => event.eventTimeUtc === "2026-07-30T12:30:00.000Z")).toBe(true);
   });
 
   it("parses Federal Reserve FOMC calendar HTML", async () => {
@@ -141,6 +151,14 @@ describe("official provider adapters", () => {
     expect(values.get("retail")).toMatchObject({ actualValue: "0.2", previousValue: "1.0", valueUnit: "%" });
   });
 
+  it("parses Census Durable Goods Actual and Prior", async () => {
+    const snapshot = parseCensusDurableRelease(read("test/fixtures/census/durable-current.html"));
+    expect(snapshot).toMatchObject({ releaseDate: "2026-06-25", actualValue: "-4.5", previousValue: "8.5" });
+    mockFetch({ "/manufacturing/m3/adv/current/": { body: read("test/fixtures/census/durable-current.html") } });
+    const values = await fetchCensusEventValues([{ id: "durable", name: "Durable Goods Orders MoM", eventTimeUtc: "2026-07-27T12:30:00.000Z" }], "2026-07-16T13:00:00.000Z");
+    expect(values.get("durable")).toMatchObject({ actualValue: null, previousValue: "-4.5", valueUnit: "%" });
+  });
+
   it("uses the latest Michigan release as Prior for a future preliminary event", async () => {
     mockFetch({ "sca.isr.umich.edu": { body: "<html><h1>Final Results for June 2026</h1><table><tr><td>Index of Consumer Sentiment</td><td>49.5</td><td>44.8</td></tr></table></html>" } });
     const values = await fetchUmichEventValues([{ id: "future-umich", name: "Michigan Consumer Sentiment Prel", eventTimeUtc: "2026-07-17T14:00:00.000Z" }], "2026-07-16T00:00:00.000Z");
@@ -152,6 +170,14 @@ describe("official provider adapters", () => {
     const result = await new IsmProvider().fetchEvents(range, env);
     expect(result.events.map((event) => event.name)).toEqual(["ISM Manufacturing PMI", "ISM Services PMI", "ISM Manufacturing PMI", "ISM Services PMI"]);
     expect(result.events[2].eventTimeUtc).toBe("2026-08-03T14:00:00.000Z");
+  });
+
+  it("uses the verified ISM 2026 schedule when the page returns 404", async () => {
+    mockFetch({ "rob-report-calendar": { status: 404, body: "not found", contentType: "text/html" } });
+    const result = await new IsmProvider().fetchEvents(range, env);
+    expect(result.events.map((event) => event.name)).toEqual(["ISM Manufacturing PMI", "ISM Services PMI", "ISM Manufacturing PMI", "ISM Services PMI"]);
+    expect(result.warnings.some((warning) => warning.code === "official_schedule_fallback")).toBe(true);
+    expect(result.warnings.some((warning) => warning.code === "source_fetch_failed")).toBe(false);
   });
 
   it("fetches official ISM PMI Actual and Prior values", async () => {

@@ -232,6 +232,13 @@ function ismValuesUrl(event: ReleaseValueEvent, delta = 0): string {
   return `${baseUrl}${month}/`;
 }
 
+async function fetchIsmPage(url: string): Promise<Response> {
+  const init = { headers: { accept: "text/html,application/xhtml+xml", "user-agent": USER_AGENT }, cache: "no-store" as RequestCache };
+  const response = await fetchWithTimeout(url, init);
+  if (response.status !== 404) return response;
+  return fetchWithTimeout(`${url}?refresh=${Date.now()}`, init);
+}
+
 function numericCell(value: string | undefined): number | undefined {
   const match = /[-+]?\d+(?:\.\d+)?/.exec((value ?? "").replace(/,/g, ""));
   if (!match) return undefined;
@@ -263,7 +270,7 @@ export async function fetchIsmEventValues(events: ReleaseValueEvent[], fetchedAt
     const valueSourceUrl = ismValuesUrl(event);
     let html = htmlByUrl.get(valueSourceUrl);
     if (html == null) {
-      const response = await fetchWithTimeout(valueSourceUrl, { headers: { accept: "text/html,application/xhtml+xml", "user-agent": USER_AGENT } });
+      const response = await fetchIsmPage(valueSourceUrl);
       html = await readBodyWithLimit(response);
       if (response.ok) htmlByUrl.set(valueSourceUrl, html);
       else if (new Date(event.eventTimeUtc).getTime() <= new Date(fetchedAt).getTime()) throw new Error(`ISM report page returned HTTP ${response.status}`);
@@ -282,9 +289,12 @@ export async function fetchIsmEventValues(events: ReleaseValueEvent[], fetchedAt
       const priorUrl = ismValuesUrl(event, -1);
       let priorHtml = htmlByUrl.get(priorUrl);
       if (priorHtml == null) {
-        const priorResponse = await fetchWithTimeout(priorUrl, { headers: { accept: "text/html,application/xhtml+xml", "user-agent": USER_AGENT } });
+        const priorResponse = await fetchIsmPage(priorUrl);
         priorHtml = await readBodyWithLimit(priorResponse);
-        if (!priorResponse.ok) throw new Error(`ISM prior report page returned HTTP ${priorResponse.status}`);
+        if (!priorResponse.ok) {
+          if (new Date(event.eventTimeUtc).getTime() > new Date(fetchedAt).getTime()) continue;
+          throw new Error(`ISM prior report page returned HTTP ${priorResponse.status}`);
+        }
         htmlByUrl.set(priorUrl, priorHtml);
       }
       const prior = parseIsmEventValue(event, priorHtml, fetchedAt, priorUrl);

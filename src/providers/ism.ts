@@ -6,6 +6,14 @@ import { dateAndTimeToUtc, eventFromRelease, inRange, parseDateOnly } from "./he
 
 const URL = "https://www.ismworld.org/supply-management-news-and-reports/reports/rob-report-calendar/";
 const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+const USER_AGENT = "EconomicEvent/1.0 (+official-release-calendar)";
+
+async function fetchIsmPage(url: string): Promise<Response> {
+  const init = { headers: { accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1", "user-agent": USER_AGENT }, cache: "no-store" as RequestCache };
+  const response = await fetchWithTimeout(url, init);
+  if (response.status !== 404) return response;
+  return fetchWithTimeout(`${url}?refresh=${Date.now()}`, init);
+}
 
 function numberCell(value: string | undefined): string | undefined {
   const match = /\b(\d{1,2})\b/.exec(value ?? "");
@@ -21,7 +29,7 @@ export class IsmProvider implements EconomicCalendarProvider {
     const warnings: ProviderWarning[] = [];
     const events: EconomicEvent[] = [];
     try {
-      const response = await fetchWithTimeout(URL, { headers: { accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1" } });
+      const response = await fetchIsmPage(URL);
       const body = await readBodyWithLimit(response);
       assertHtmlResponse(response, body);
       const rows = parseHtmlTableRows(body);

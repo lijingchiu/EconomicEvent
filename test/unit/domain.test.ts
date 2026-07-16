@@ -10,6 +10,7 @@ describe("event domain", () => {
     expect(classifyEventName("CPI").category).toBe("inflation");
     expect(classifyEventName("Consumer Price Index (CPI)").category).toBe("inflation");
     expect(classifyEventName("CPI methodology update").tracked).toBe(false);
+    expect(classifyEventName("State Job Openings and Labor Turnover").tracked).toBe(false);
     expect(normalizeEventName("  Consumer—Price  Index  ")).toBe("consumer price index");
   });
 

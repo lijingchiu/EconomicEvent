@@ -67,6 +67,7 @@ export async function eventFromRelease(input: {
 export function releaseMetricNames(name: string): string[] {
   const normalized = name.toLowerCase();
   if (/methodology/.test(normalized)) return [name];
+  if (/^state job openings and labor turnover/.test(normalized)) return [name];
   if (/consumer price index|\bcpi\b/.test(normalized) && !/producer/.test(normalized)) return ["Inflation Rate MoM", "Core Inflation Rate MoM", "Inflation Rate YoY", "Core Inflation Rate YoY"];
   if (/producer price index|\bppi\b/.test(normalized)) return ["PPI MoM"];
   if (/employment situation|\bnfp\b|non.?farm payroll/.test(normalized)) return ["Non Farm Payrolls", "Unemployment Rate"];

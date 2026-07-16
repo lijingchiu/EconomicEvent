@@ -39,5 +39,5 @@ export async function readBodyWithLimit(response: Response, maxBytes = 1_500_000
   const merged = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) { merged.set(chunk, offset); offset += chunk.byteLength; }
-  return new TextDecoder().decode(merged);
+  return new TextDecoder().decode(merged).replace(/^\uFEFF/, "");
 }

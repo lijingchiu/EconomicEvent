@@ -51,11 +51,23 @@ describe("official provider adapters", () => {
   });
 
   it("builds EIA weekly events from official schedule rules", async () => {
-    mockFetch({ "schedule.php": { body: read("test/fixtures/eia/wpsr-schedule.html") }, "schedule.html": { body: read("test/fixtures/eia/wngsr-schedule.html") } });
+    mockFetch({
+      "schedule.php": { body: read("test/fixtures/eia/wpsr-schedule.html") },
+      "/petroleum/supply/weekly/": { body: read("test/fixtures/eia/wpsr-report.html") },
+      "table1.csv": { body: read("test/fixtures/eia/wpsr-table1.csv"), contentType: "text/csv; charset=utf-8" },
+      "schedule.html": { body: read("test/fixtures/eia/wngsr-schedule.html") },
+      "wngsr.json": { body: read("test/fixtures/eia/wngsr.json"), contentType: "application/json; charset=utf-8" },
+    });
     const result = await new EiaProvider().fetchEvents(range, env);
-    expect(result.events.map((event) => event.name)).toContain("Weekly Petroleum Status Report");
-    expect(result.events.map((event) => event.name)).toContain("Natural Gas Storage");
+    expect(result.events.map((event) => event.name)).toEqual(expect.arrayContaining(["Crude Oil Inventories", "Gasoline Inventories", "Distillate Inventories", "Natural Gas Storage"]));
     expect(result.events.every((event) => event.eventTimeUtc.endsWith("Z"))).toBe(true);
+    const wpsrRelease = result.events.filter((event) => event.eventTimeUtc === "2026-07-15T14:30:00.000Z");
+    expect(wpsrRelease.map((event) => event.name)).toEqual(expect.arrayContaining(["Crude Oil Inventories", "Gasoline Inventories", "Distillate Inventories"]));
+    expect(wpsrRelease.find((event) => event.name === "Crude Oil Inventories")?.actualValue).toBe("726.2");
+    expect(wpsrRelease.find((event) => event.name === "Gasoline Inventories")?.previousValue).toBe("212.1");
+    const ngsrRelease = result.events.find((event) => event.eventTimeUtc === "2026-07-09T14:30:00.000Z" && event.name === "Natural Gas Storage");
+    expect(ngsrRelease?.actualValue).toBe("2,983");
+    expect(ngsrRelease?.previousValue).toBe("2,922");
   });
 
   it("parses Census release components", async () => {

@@ -76,6 +76,8 @@ export function releaseMetricNames(name: string): string[] {
   if (/retail sales|monthly sales for retail/.test(normalized)) return ["Retail Sales MoM"];
   if (/durable goods orders|durable goods.*manufacturers/.test(normalized)) return ["Durable Goods Orders MoM"];
   if (/new residential construction/.test(normalized)) return ["Building Permits Prel", "Housing Starts"];
+  if (/weekly petroleum status report/.test(normalized)) return ["Crude Oil Inventories", "Gasoline Inventories", "Distillate Inventories"];
+  if (/weekly natural gas storage report|natural gas storage/.test(normalized)) return ["Natural Gas Storage"];
   return [name];
 }
 

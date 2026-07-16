@@ -4,6 +4,7 @@ import { BlsProvider } from "../../src/providers/bls";
 import { BeaProvider } from "../../src/providers/bea";
 import { FederalReserveProvider } from "../../src/providers/federal-reserve";
 import { EiaProvider } from "../../src/providers/eia";
+import { fetchEiaEventValues } from "../../src/providers/eia";
 import { CensusProvider } from "../../src/providers/census";
 import { IsmProvider } from "../../src/providers/ism";
 import { UmichProvider } from "../../src/providers/umich";
@@ -68,6 +69,22 @@ describe("official provider adapters", () => {
     const ngsrRelease = result.events.find((event) => event.eventTimeUtc === "2026-07-09T14:30:00.000Z" && event.name === "Natural Gas Storage");
     expect(ngsrRelease?.actualValue).toBe("2,983");
     expect(ngsrRelease?.previousValue).toBe("2,922");
+  });
+
+  it("fetches official EIA release values for refresh backfill", async () => {
+    mockFetch({
+      "/petroleum/supply/weekly/": { body: read("test/fixtures/eia/wpsr-report.html") },
+      "table1.csv": { body: read("test/fixtures/eia/wpsr-table1.csv"), contentType: "text/csv; charset=utf-8" },
+      "wngsr.json": { body: read("test/fixtures/eia/wngsr.json"), contentType: "application/json; charset=utf-8" },
+    });
+    const values = await fetchEiaEventValues([
+      { id: "wpsr-crude", name: "Crude Oil Inventories", eventTimeUtc: "2026-07-15T14:30:00.000Z" },
+      { id: "wpsr-gasoline", name: "Gasoline Inventories", eventTimeUtc: "2026-07-15T14:30:00.000Z" },
+      { id: "wngsr-storage", name: "Natural Gas Storage", eventTimeUtc: "2026-07-09T14:30:00.000Z" },
+    ]);
+    expect(values.get("wpsr-crude")?.actualValue).toBe("726.2");
+    expect(values.get("wpsr-gasoline")?.previousValue).toBe("212.1");
+    expect(values.get("wngsr-storage")?.actualValue).toBe("2,983");
   });
 
   it("parses Census release components", async () => {

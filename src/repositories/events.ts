@@ -4,6 +4,16 @@ import { reminderSchedule } from "../domain/reminder";
 
 export type EventFilter = { fromUtc: string; toUtc: string; provider?: string; category?: string; impact?: string; limit?: number };
 
+export type EventValueCandidate = Pick<EconomicEvent, "id" | "provider" | "name" | "eventTimeUtc">;
+
+export type EventValueUpdate = {
+  actualValue: string;
+  previousValue: string | null;
+  valueUnit: string | null;
+  valueSourceUrl: string;
+  sourceUpdatedAt: string;
+};
+
 export async function upsertEconomicEvent(db: D1Database, event: EconomicEvent, config: AppConfig): Promise<"inserted" | "updated"> {
   const existing = await db.prepare("SELECT id, created_at, event_time_utc FROM economic_events WHERE id = ?").bind(event.id).first<{ id: string; created_at: string; event_time_utc: string }>();
   const now = new Date().toISOString();
@@ -35,6 +45,47 @@ export async function listEvents(db: D1Database, filter: EventFilter): Promise<R
   const limit = Math.min(Math.max(filter.limit ?? 30, 1), 200);
   const result = await db.prepare(`SELECT id, provider, provider_event_id AS providerEventId, source_url AS sourceUrl, name, normalized_name AS normalizedName, category, country, currency, event_time_utc AS eventTimeUtc, local_display_timezone AS localDisplayTimezone, impact, affected_markets_json AS affectedMarketsJson, description, actual_value AS actualValue, forecast_value AS forecastValue, previous_value AS previousValue, value_unit AS valueUnit, value_source_url AS valueSourceUrl, source_updated_at AS sourceUpdatedAt, raw_hash AS rawHash, created_at AS createdAt, updated_at AS updatedAt FROM economic_events WHERE ${conditions.join(" AND ")} ORDER BY event_time_utc ASC LIMIT ?`).bind(...values, limit).all<Record<string, unknown>>();
   return result.results;
+}
+
+const BLS_VALUE_NAMES = ["Inflation Rate MoM", "Core Inflation Rate MoM", "Inflation Rate YoY", "Core Inflation Rate YoY", "PPI MoM", "Non Farm Payrolls", "Unemployment Rate"];
+const EIA_VALUE_NAMES = ["Crude Oil Inventories", "Gasoline Inventories", "Distillate Inventories", "Natural Gas Storage"];
+
+export async function listEventsMissingValues(db: D1Database, fromUtc: string, toUtc: string): Promise<EventValueCandidate[]> {
+  const result = await db.prepare(`SELECT id, provider, name, event_time_utc AS eventTimeUtc
+    FROM economic_events
+    WHERE actual_value IS NULL
+      AND (
+        (provider = 'bls' AND name IN (${BLS_VALUE_NAMES.map(() => "?").join(", ")}))
+        OR provider = 'umich'
+        OR (provider = 'eia' AND name IN (${EIA_VALUE_NAMES.map(() => "?").join(", ")}))
+      )
+      AND event_time_utc >= ?
+      AND event_time_utc <= ?
+    ORDER BY event_time_utc ASC`).bind(...BLS_VALUE_NAMES, ...EIA_VALUE_NAMES, fromUtc, toUtc).all<EventValueCandidate>();
+  return result.results;
+}
+
+export async function setOfficialEventValues(db: D1Database, id: string, update: EventValueUpdate): Promise<boolean> {
+  const now = new Date().toISOString();
+  const result = await db.prepare(`UPDATE economic_events
+    SET actual_value = ?, previous_value = COALESCE(?, previous_value), value_unit = ?, value_source_url = ?, source_updated_at = ?, updated_at = ?
+    WHERE id = ? AND actual_value IS NULL`).bind(
+    update.actualValue,
+    update.previousValue,
+    update.valueUnit,
+    update.valueSourceUrl,
+    update.sourceUpdatedAt,
+    now,
+    id,
+  ).run();
+  const updated = Number(result.meta.changes ?? 0) > 0;
+  if (updated) {
+    // -1 is reserved for the one-time post-release result notification.
+    await db.prepare(`INSERT INTO notification_deliveries (event_id, reminder_minutes, scheduled_for_utc, status, attempts, created_at, updated_at)
+      VALUES (?, -1, ?, 'pending', 0, ?, ?)
+      ON CONFLICT(event_id, reminder_minutes) DO NOTHING`).bind(id, now, now, now).run();
+  }
+  return updated;
 }
 
 export async function getEvent(db: D1Database, id: string): Promise<EconomicEvent | null> {

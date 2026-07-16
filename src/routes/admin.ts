@@ -7,6 +7,7 @@ import { lastSuccessfulSync } from "../repositories/sync-runs";
 import { deliverySummary } from "../repositories/deliveries";
 import { saveSettings } from "../repositories/settings";
 import { syncProviders } from "../services/provider-sync";
+import { refreshDueEventValues } from "../services/value-refresh";
 import { checkDueNotifications } from "../services/notification-checker";
 import { DiscordWebhookClient } from "../providers/discord";
 
@@ -27,7 +28,7 @@ export async function adminRoute(request: Request, env: Env, path: string): Prom
       return json({
         nowUtc: now.toISOString(),
         settings: publicSettings(config),
-        events: await listEvents(env.DB, { fromUtc: now.toISOString(), toUtc: new Date(now.getTime() + 30 * 86_400_000).toISOString(), limit: 100 }),
+        events: await listEvents(env.DB, { fromUtc: new Date(now.getTime() - 86_400_000).toISOString(), toUtc: new Date(now.getTime() + 30 * 86_400_000).toISOString(), limit: 100 }),
         providers: await listProviderHealth(env.DB),
         lastSuccessfulSync: await lastSuccessfulSync(env.DB),
         deliverySummary: await deliverySummary(env.DB),
@@ -42,8 +43,9 @@ export async function adminRoute(request: Request, env: Env, path: string): Prom
       const body = await request.json().catch(() => ({})) as { providers?: ProviderName[] };
       const allowed = new Set(["bls", "bea", "federal_reserve", "eia", "census", "ism", "umich"]);
       const providers = body.providers?.filter((provider) => allowed.has(provider)) as ProviderName[] | undefined;
-      return json({ summaries: await syncProviders(env, providers) });
+      return json({ summaries: await syncProviders(env, providers), valueRefresh: await refreshDueEventValues(env, new Date(), { force: true }) });
     }
+    if (request.method === "POST" && path === "/admin/refresh-values") return json({ result: await refreshDueEventValues(env, new Date(), { force: true }) });
     if (request.method === "POST" && path === "/admin/check") return json({ result: await checkDueNotifications(env) });
     if (request.method === "POST" && path === "/admin/test-discord") return json({ result: await new DiscordWebhookClient(env).sendTest() });
     return json({ error: "not_found" }, 404);

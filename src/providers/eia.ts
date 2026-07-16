@@ -1,4 +1,5 @@
 import type { EconomicCalendarProvider } from "./index";
+import type { EconomicEvent } from "../types";
 import type { AppConfig, Env, ProviderFetchResult, ProviderWarning } from "../types";
 import { fetchWithTimeout, readBodyWithLimit } from "../utils/fetch-with-timeout";
 import { assertHtmlResponse, htmlToText } from "../parsers/html";
@@ -136,6 +137,16 @@ function comparisonPhrase(value: number, unit: string, reference: string, fracti
   return `${formatNumber(Math.abs(value), fractionDigits)} ${unit} ${value > 0 ? "above" : "below"} ${reference}`;
 }
 
+export type EiaReleaseValue = {
+  actualValue: string;
+  previousValue: string | null;
+  valueUnit: string | null;
+  valueSourceUrl: string;
+  sourceUpdatedAt: string;
+};
+
+export type EiaReleaseEvent = Pick<EconomicEvent, "id" | "name" | "eventTimeUtc">;
+
 function parseEiaDate(value: string): string {
   const trimmed = value.trim();
   const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(trimmed);
@@ -155,6 +166,33 @@ async function fetchText(url: string, init: RequestInit, errorMessage: string): 
   if (!response.ok) throw new Error(`${errorMessage} (HTTP ${response.status})`);
   if (!body.trim()) throw new Error(`${errorMessage} returned an empty response`);
   return body;
+}
+
+export async function fetchEiaEventValues(events: EiaReleaseEvent[], fetchedAt = new Date().toISOString()): Promise<Map<string, EiaReleaseValue>> {
+  if (!events.length) return new Map();
+  const names = new Set(events.map((event) => event.name));
+  const [wpsr, wngsr] = await Promise.all([
+    names.has("Crude Oil Inventories") || names.has("Gasoline Inventories") || names.has("Distillate Inventories")
+      ? fetchWpsrSnapshot()
+      : Promise.resolve(null),
+    names.has("Natural Gas Storage")
+      ? fetchWngsrSnapshot()
+      : Promise.resolve(null),
+  ]);
+  const values = new Map<string, EiaReleaseValue>();
+  for (const event of events) {
+    const localDate = localDateParts(new Date(event.eventTimeUtc)).date;
+    if (event.name === "Natural Gas Storage" && wngsr?.releaseDate === localDate) {
+      const metric = wngsr.metrics[event.name];
+      if (metric) values.set(event.id, metric.values);
+      continue;
+    }
+    if ((event.name === "Crude Oil Inventories" || event.name === "Gasoline Inventories" || event.name === "Distillate Inventories") && wpsr?.releaseDate === localDate) {
+      const metric = wpsr.metrics[event.name];
+      if (metric) values.set(event.id, metric.values);
+    }
+  }
+  return values;
 }
 
 function buildWpsrSnapshot(reportHtml: string, csvBody: string): SnapshotBundle {

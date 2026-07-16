@@ -5,7 +5,8 @@ import { BeaProvider } from "../../src/providers/bea";
 import { FederalReserveProvider } from "../../src/providers/federal-reserve";
 import { EiaProvider } from "../../src/providers/eia";
 import { fetchEiaEventValues } from "../../src/providers/eia";
-import { fetchBlsEventValues, fetchIsmEventValues } from "../../src/providers/release-values";
+import { fetchBlsEventValues, fetchIsmEventValues, fetchUmichEventValues } from "../../src/providers/release-values";
+import { fetchCensusEventValues } from "../../src/providers/census-values";
 import { CensusProvider } from "../../src/providers/census";
 import { IsmProvider } from "../../src/providers/ism";
 import { UmichProvider } from "../../src/providers/umich";
@@ -107,10 +108,35 @@ describe("official provider adapters", () => {
     expect(values.get("wngsr-storage")?.actualValue).toBe("2,983");
   });
 
+  it("uses the latest EIA release as Prior for a future event", async () => {
+    mockFetch({
+      "/petroleum/supply/weekly/": { body: read("test/fixtures/eia/wpsr-report.html") },
+      "table1.csv": { body: read("test/fixtures/eia/wpsr-table1.csv"), contentType: "text/csv; charset=utf-8" },
+    });
+    const values = await fetchEiaEventValues([{ id: "future-crude", name: "Crude Oil Inventories", eventTimeUtc: "2026-07-22T14:30:00.000Z" }], "2026-07-16T00:00:00.000Z");
+    expect(values.get("future-crude")).toMatchObject({ actualValue: null, previousValue: "726.2" });
+  });
+
   it("parses Census release components", async () => {
     mockFetch({ "calendar-listview": { body: read("test/fixtures/census/calendar.html") } });
     const result = await new CensusProvider().fetchEvents(range, env);
     expect(result.events.map((event) => event.name)).toEqual(["Retail Sales MoM", "Building Permits Prel", "Housing Starts", "Durable Goods Orders MoM"]);
+  });
+
+  it("uses the latest Census residential release as Prior for future housing events", async () => {
+    mockFetch({ "/construction/nrc/current/": { body: read("test/fixtures/census/residential-current.html") } });
+    const values = await fetchCensusEventValues([
+      { id: "future-permits", name: "Building Permits Prel", eventTimeUtc: "2026-07-17T12:30:00.000Z" },
+      { id: "future-starts", name: "Housing Starts", eventTimeUtc: "2026-07-17T12:30:00.000Z" },
+    ], "2026-07-16T00:00:00.000Z");
+    expect(values.get("future-permits")).toMatchObject({ actualValue: null, previousValue: "1,413,000", valueUnit: "units" });
+    expect(values.get("future-starts")).toMatchObject({ actualValue: null, previousValue: "1,177,000", valueUnit: "units" });
+  });
+
+  it("uses the latest Michigan release as Prior for a future preliminary event", async () => {
+    mockFetch({ "sca.isr.umich.edu": { body: "<html><h1>Final Results for June 2026</h1><table><tr><td>Index of Consumer Sentiment</td><td>49.5</td><td>44.8</td></tr></table></html>" } });
+    const values = await fetchUmichEventValues([{ id: "future-umich", name: "Michigan Consumer Sentiment Prel", eventTimeUtc: "2026-07-17T14:00:00.000Z" }], "2026-07-16T00:00:00.000Z");
+    expect(values.get("future-umich")).toMatchObject({ actualValue: null, previousValue: "49.5" });
   });
 
   it("parses ISM's official month table", async () => {

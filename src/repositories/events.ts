@@ -1,6 +1,7 @@
 import type { AppConfig } from "../types";
 import type { EconomicEvent } from "../types";
 import { reminderSchedule } from "../domain/reminder";
+import { explainEvent } from "../domain/event-explanation";
 
 export type EventFilter = { fromUtc: string; toUtc: string; provider?: string; category?: string; impact?: string; limit?: number };
 
@@ -9,6 +10,13 @@ export type EventValueCandidate = Pick<EconomicEvent, "id" | "provider" | "name"
 export type EventValueUpdate = {
   actualValue: string;
   previousValue: string | null;
+  valueUnit: string | null;
+  valueSourceUrl: string;
+  sourceUpdatedAt: string;
+};
+
+export type EventPriorUpdate = {
+  previousValue: string;
   valueUnit: string | null;
   valueSourceUrl: string;
   sourceUpdatedAt: string;
@@ -44,12 +52,16 @@ export async function listEvents(db: D1Database, filter: EventFilter): Promise<R
   if (filter.impact) { conditions.push("impact = ?"); values.push(filter.impact); }
   const limit = Math.min(Math.max(filter.limit ?? 30, 1), 200);
   const result = await db.prepare(`SELECT id, provider, provider_event_id AS providerEventId, source_url AS sourceUrl, name, normalized_name AS normalizedName, category, country, currency, event_time_utc AS eventTimeUtc, local_display_timezone AS localDisplayTimezone, impact, affected_markets_json AS affectedMarketsJson, description, actual_value AS actualValue, forecast_value AS forecastValue, previous_value AS previousValue, value_unit AS valueUnit, value_source_url AS valueSourceUrl, source_updated_at AS sourceUpdatedAt, raw_hash AS rawHash, created_at AS createdAt, updated_at AS updatedAt FROM economic_events WHERE ${conditions.join(" AND ")} ORDER BY event_time_utc ASC LIMIT ?`).bind(...values, limit).all<Record<string, unknown>>();
-  return result.results;
+  return result.results.map((row) => ({
+    ...row,
+    eventExplanation: explainEvent(rowToEconomicEvent(row)),
+  }));
 }
 
 const BLS_VALUE_NAMES = ["Inflation Rate MoM", "Core Inflation Rate MoM", "Inflation Rate YoY", "Core Inflation Rate YoY", "PPI MoM", "Non Farm Payrolls", "Unemployment Rate", "JOLTs Job Openings"];
 const EIA_VALUE_NAMES = ["Weekly Petroleum Status Report", "Crude Oil Inventories", "Gasoline Inventories", "Distillate Inventories", "Natural Gas Storage"];
 const ISM_VALUE_NAMES = ["ISM Manufacturing PMI", "ISM Services PMI"];
+const CENSUS_VALUE_NAMES = ["Retail Sales MoM", "Building Permits Prel", "Housing Starts", "Durable Goods Orders MoM"];
 
 export async function listEventsMissingValues(db: D1Database, fromUtc: string, toUtc: string): Promise<EventValueCandidate[]> {
   const result = await db.prepare(`SELECT id, provider, name, event_time_utc AS eventTimeUtc
@@ -64,6 +76,23 @@ export async function listEventsMissingValues(db: D1Database, fromUtc: string, t
       AND event_time_utc >= ?
       AND event_time_utc <= ?
     ORDER BY event_time_utc ASC`).bind(...BLS_VALUE_NAMES, ...EIA_VALUE_NAMES, ...ISM_VALUE_NAMES, fromUtc, toUtc).all<EventValueCandidate>();
+  return result.results;
+}
+
+export async function listEventsMissingPriors(db: D1Database, fromUtc: string, toUtc: string): Promise<EventValueCandidate[]> {
+  const result = await db.prepare(`SELECT id, provider, name, event_time_utc AS eventTimeUtc
+    FROM economic_events
+    WHERE previous_value IS NULL
+      AND (
+        (provider = 'bls' AND name IN (${BLS_VALUE_NAMES.map(() => "?").join(", ")}))
+        OR provider = 'umich'
+        OR (provider = 'eia' AND name IN (${EIA_VALUE_NAMES.map(() => "?").join(", ")}))
+        OR (provider = 'ism' AND name IN (${ISM_VALUE_NAMES.map(() => "?").join(", ")}))
+        OR (provider = 'census' AND name IN (${CENSUS_VALUE_NAMES.map(() => "?").join(", ")}))
+      )
+      AND event_time_utc >= ?
+      AND event_time_utc <= ?
+    ORDER BY event_time_utc ASC`).bind(...BLS_VALUE_NAMES, ...EIA_VALUE_NAMES, ...ISM_VALUE_NAMES, ...CENSUS_VALUE_NAMES, fromUtc, toUtc).all<EventValueCandidate>();
   return result.results;
 }
 
@@ -88,6 +117,47 @@ export async function setOfficialEventValues(db: D1Database, id: string, update:
       ON CONFLICT(event_id, reminder_minutes) DO NOTHING`).bind(id, now, now, now).run();
   }
   return updated;
+}
+
+export async function setOfficialEventPrior(db: D1Database, id: string, update: EventPriorUpdate): Promise<boolean> {
+  const now = new Date().toISOString();
+  const result = await db.prepare(`UPDATE economic_events
+    SET previous_value = ?, value_unit = COALESCE(?, value_unit), value_source_url = ?, source_updated_at = ?, updated_at = ?
+    WHERE id = ? AND previous_value IS NULL`).bind(
+    update.previousValue,
+    update.valueUnit,
+    update.valueSourceUrl,
+    update.sourceUpdatedAt,
+    now,
+    id,
+  ).run();
+  return Number(result.meta.changes ?? 0) > 0;
+}
+
+function rowToEconomicEvent(row: Record<string, unknown>): EconomicEvent {
+  return {
+    id: String(row.id),
+    provider: row.provider as EconomicEvent["provider"],
+    providerEventId: row.providerEventId ? String(row.providerEventId) : undefined,
+    sourceUrl: String(row.sourceUrl),
+    name: String(row.name),
+    normalizedName: String(row.normalizedName),
+    category: row.category as EconomicEvent["category"],
+    country: "US",
+    currency: "USD",
+    eventTimeUtc: String(row.eventTimeUtc),
+    localDisplayTimezone: String(row.localDisplayTimezone),
+    impact: row.impact as EconomicEvent["impact"],
+    affectedMarkets: JSON.parse(String(row.affectedMarketsJson)) as EconomicEvent["affectedMarkets"],
+    description: row.description ? String(row.description) : null,
+    actualValue: row.actualValue ? String(row.actualValue) : null,
+    forecastValue: row.forecastValue ? String(row.forecastValue) : null,
+    previousValue: row.previousValue ? String(row.previousValue) : null,
+    valueUnit: row.valueUnit ? String(row.valueUnit) : null,
+    valueSourceUrl: row.valueSourceUrl ? String(row.valueSourceUrl) : null,
+    sourceUpdatedAt: row.sourceUpdatedAt ? String(row.sourceUpdatedAt) : null,
+    rawHash: String(row.rawHash),
+  };
 }
 
 export async function getEvent(db: D1Database, id: string): Promise<EconomicEvent | null> {

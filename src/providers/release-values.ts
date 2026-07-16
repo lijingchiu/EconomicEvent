@@ -10,7 +10,7 @@ export const ISM_SERVICES_VALUES_URL = "https://www.ismworld.org/supply-manageme
 const USER_AGENT = "EconomicEventBot/1.0 (+https://github.com/lijingchiu/EconomicEvent)";
 
 export type ReleaseValue = {
-  actualValue: string;
+  actualValue: string | null;
   previousValue: string | null;
   valueUnit: string | null;
   valueSourceUrl: string;
@@ -94,38 +94,40 @@ function metricValue(name: string, series: Map<string, Map<string, number>>, per
 
   if (name === "Unemployment Rate") {
     const actual = valueAt(values, period);
-    if (actual == null) return null;
     const prior = valueAt(values, previous);
-    return { actualValue: oneDecimal(actual), previousValue: prior == null ? null : oneDecimal(prior), valueUnit: "%" };
+    if (actual == null && prior == null) return null;
+    return { actualValue: actual == null ? null : oneDecimal(actual), previousValue: prior == null ? null : oneDecimal(prior), valueUnit: "%" };
   }
 
   if (name === "Non Farm Payrolls") {
     const current = valueAt(values, period);
     const priorLevel = valueAt(values, previous);
-    if (current == null || priorLevel == null) return null;
     const earlierLevel = valueAt(values, twoMonthsAgo);
+    const actual = current == null || priorLevel == null ? null : String(Math.round(current - priorLevel));
+    const prior = priorLevel == null || earlierLevel == null ? null : String(Math.round(priorLevel - earlierLevel));
+    if (actual == null && prior == null) return null;
     return {
-      actualValue: String(Math.round(current - priorLevel)),
-      previousValue: earlierLevel == null ? null : String(Math.round(priorLevel - earlierLevel)),
+      actualValue: actual,
+      previousValue: prior,
       valueUnit: "K",
     };
   }
 
   if (name === "JOLTs Job Openings") {
     const actual = valueAt(values, period);
-    if (actual == null) return null;
     const prior = valueAt(values, previous);
-    return { actualValue: String(Math.round(actual)), previousValue: prior == null ? null : String(Math.round(prior)), valueUnit: "K" };
+    if (actual == null && prior == null) return null;
+    return { actualValue: actual == null ? null : String(Math.round(actual)), previousValue: prior == null ? null : String(Math.round(prior)), valueUnit: "K" };
   }
 
   const yearOverYear = name.endsWith("YoY");
   const actual = yearOverYear
     ? percentChange(valueAt(values, period), valueAt(values, yearAgo))
     : percentChange(valueAt(values, period), valueAt(values, previous));
-  if (actual == null) return null;
   const prior = yearOverYear
     ? percentChange(valueAt(values, previous), valueAt(values, priorYearAgo))
     : percentChange(valueAt(values, previous), valueAt(values, twoMonthsAgo));
+  if (actual == null && prior == null) return null;
   return { actualValue: actual, previousValue: prior, valueUnit: "%" };
 }
 
@@ -138,7 +140,10 @@ export function buildBlsEventValues(events: ReleaseValueEvent[], response: BlsRe
   const values = new Map<string, ReleaseValue>();
   for (const event of events) {
     const metric = metricValue(event.name, series, expectedPeriod);
-    if (metric) values.set(event.id, { ...metric, valueSourceUrl: BLS_API_URL, sourceUpdatedAt: fetchedAt });
+    if (metric) {
+      const future = new Date(event.eventTimeUtc).getTime() > new Date(fetchedAt).getTime();
+      values.set(event.id, { ...metric, actualValue: future ? null : metric.actualValue, previousValue: future ? metric.actualValue ?? metric.previousValue : metric.previousValue, valueSourceUrl: BLS_API_URL, sourceUpdatedAt: fetchedAt });
+    }
   }
   return values;
 }
@@ -194,15 +199,34 @@ export async function fetchUmichEventValues(events: ReleaseValueEvent[], fetched
   const html = await readBodyWithLimit(response);
   if (!response.ok) throw new Error(`Michigan results page returned HTTP ${response.status}`);
   const values = new Map<string, ReleaseValue>();
+  const latest = parseUmichLatestValue(html, fetchedAt);
   for (const event of events) {
     const value = parseUmichEventValue(event, html, fetchedAt);
-    if (value) values.set(event.id, value);
+    if (value) {
+      values.set(event.id, value);
+      continue;
+    }
+    const isFuture = new Date(event.eventTimeUtc).getTime() > new Date(fetchedAt).getTime();
+    const expected = zonedYearMonth(event.eventTimeUtc);
+    const sourceIsEarlier = latest && (latest.year < expected.year || (latest.year === expected.year && latest.month < expected.month) || (latest.year === expected.year && latest.month === expected.month && latest.phase === "preliminary" && /final/i.test(event.name)));
+    if (isFuture && sourceIsEarlier && latest) {
+      values.set(event.id, { actualValue: null, previousValue: latest.value, valueUnit: null, valueSourceUrl: UMICH_VALUES_URL, sourceUpdatedAt: fetchedAt });
+    }
   }
   return values;
 }
 
-function ismValuesUrl(event: ReleaseValueEvent): string {
-  const period = shiftMonth(zonedYearMonth(event.eventTimeUtc), -1);
+function parseUmichLatestValue(html: string, fetchedAt: string): { phase: "preliminary" | "final"; year: number; month: number; value: string } | null {
+  const heading = /\b(Preliminary|Final)\s+Results\s+for\s+([A-Za-z]+)\s+(\d{4})\b/i.exec(html);
+  if (!heading) return null;
+  const row = parseHtmlTableRows(html).find((cells) => /^index of consumer sentiment$/i.test(cells[0]?.trim() ?? ""));
+  const actual = Number(row?.[1]);
+  if (!Number.isFinite(actual)) return null;
+  return { phase: heading[1].toLowerCase() as "preliminary" | "final", month: MONTHS.indexOf(heading[2].toLowerCase()) + 1, year: Number(heading[3]), value: oneDecimal(actual) };
+}
+
+function ismValuesUrl(event: ReleaseValueEvent, delta = 0): string {
+  const period = shiftMonth(zonedYearMonth(event.eventTimeUtc), -1 + delta);
   const month = MONTHS[period.month - 1];
   const baseUrl = event.name === "ISM Services PMI" ? ISM_SERVICES_VALUES_URL : ISM_MANUFACTURING_VALUES_URL;
   return `${baseUrl}${month}/`;
@@ -241,11 +265,31 @@ export async function fetchIsmEventValues(events: ReleaseValueEvent[], fetchedAt
     if (html == null) {
       const response = await fetchWithTimeout(valueSourceUrl, { headers: { accept: "text/html,application/xhtml+xml", "user-agent": USER_AGENT } });
       html = await readBodyWithLimit(response);
-      if (!response.ok) throw new Error(`ISM report page returned HTTP ${response.status}`);
-      htmlByUrl.set(valueSourceUrl, html);
+      if (response.ok) htmlByUrl.set(valueSourceUrl, html);
+      else if (new Date(event.eventTimeUtc).getTime() <= new Date(fetchedAt).getTime()) throw new Error(`ISM report page returned HTTP ${response.status}`);
     }
-    const value = parseIsmEventValue(event, html, fetchedAt, valueSourceUrl);
-    if (value) values.set(event.id, value);
+    let value: ReleaseValue | null = null;
+    if (html && html.trim()) {
+      try { value = parseIsmEventValue(event, html, fetchedAt, valueSourceUrl); } catch (error) {
+        if (new Date(event.eventTimeUtc).getTime() <= new Date(fetchedAt).getTime()) throw error;
+      }
+    }
+    if (value) {
+      values.set(event.id, value);
+      continue;
+    }
+    if (new Date(event.eventTimeUtc).getTime() > new Date(fetchedAt).getTime()) {
+      const priorUrl = ismValuesUrl(event, -1);
+      let priorHtml = htmlByUrl.get(priorUrl);
+      if (priorHtml == null) {
+        const priorResponse = await fetchWithTimeout(priorUrl, { headers: { accept: "text/html,application/xhtml+xml", "user-agent": USER_AGENT } });
+        priorHtml = await readBodyWithLimit(priorResponse);
+        if (!priorResponse.ok) throw new Error(`ISM prior report page returned HTTP ${priorResponse.status}`);
+        htmlByUrl.set(priorUrl, priorHtml);
+      }
+      const prior = parseIsmEventValue(event, priorHtml, fetchedAt, priorUrl);
+      if (prior?.actualValue != null) values.set(event.id, { actualValue: null, previousValue: prior.actualValue, valueUnit: prior.valueUnit ?? null, valueSourceUrl: priorUrl, sourceUpdatedAt: prior.sourceUpdatedAt ?? fetchedAt });
+    }
   }
   return values;
 }

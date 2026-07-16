@@ -138,7 +138,7 @@ function comparisonPhrase(value: number, unit: string, reference: string, fracti
 }
 
 export type EiaReleaseValue = {
-  actualValue: string;
+  actualValue: string | null;
   previousValue: string | null;
   valueUnit: string | null;
   valueSourceUrl: string;
@@ -174,7 +174,7 @@ export async function fetchEiaEventValues(events: EiaReleaseEvent[], fetchedAt =
   if (!events.length) return new Map();
   const names = new Set(events.map((event) => event.name));
   const [wpsr, wngsr] = await Promise.all([
-    names.has("Crude Oil Inventories") || names.has("Gasoline Inventories") || names.has("Distillate Inventories")
+    names.has(WPSR_RELEASE_NAME) || names.has("Crude Oil Inventories") || names.has("Gasoline Inventories") || names.has("Distillate Inventories")
       ? fetchWpsrSnapshot()
       : Promise.resolve(null),
     names.has("Natural Gas Storage")
@@ -189,12 +189,23 @@ export async function fetchEiaEventValues(events: EiaReleaseEvent[], fetchedAt =
       if (metric) values.set(event.id, metric.values);
       continue;
     }
+    if (event.name === "Natural Gas Storage" && wngsr && localDate > wngsr.releaseDate) {
+      const metric = wngsr.metrics[event.name];
+      if (metric) values.set(event.id, { ...metric.values, actualValue: null, previousValue: metric.values.actualValue });
+      continue;
+    }
     if ((event.name === WPSR_RELEASE_NAME || event.name === "Crude Oil Inventories" || event.name === "Gasoline Inventories" || event.name === "Distillate Inventories") && wpsr?.releaseDate === localDate) {
       // Older D1 rows stored the whole WPSR as one release-level event. Keep
       // those rows backfillable by using crude oil as the release headline.
       const metricName = event.name === WPSR_RELEASE_NAME ? "Crude Oil Inventories" : event.name;
       const metric = wpsr.metrics[metricName];
       if (metric) values.set(event.id, metric.values);
+      continue;
+    }
+    if ((event.name === WPSR_RELEASE_NAME || event.name === "Crude Oil Inventories" || event.name === "Gasoline Inventories" || event.name === "Distillate Inventories") && wpsr && localDate > wpsr.releaseDate) {
+      const metricName = event.name === WPSR_RELEASE_NAME ? "Crude Oil Inventories" : event.name;
+      const metric = wpsr.metrics[metricName];
+      if (metric) values.set(event.id, { ...metric.values, actualValue: null, previousValue: metric.values.actualValue });
     }
   }
   return values;

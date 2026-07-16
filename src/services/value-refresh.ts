@@ -1,6 +1,7 @@
 import { fetchBlsEventValues, fetchIsmEventValues, fetchUmichEventValues } from "../providers/release-values";
 import { fetchEiaEventValues } from "../providers/eia";
-import { listEventsMissingValues, setOfficialEventValues, type EventValueCandidate } from "../repositories/events";
+import { fetchCensusEventValues } from "../providers/census-values";
+import { listEventsMissingPriors, listEventsMissingValues, setOfficialEventPrior, setOfficialEventValues, type EventValueCandidate } from "../repositories/events";
 import type { Env, ProviderName } from "../types";
 import { log, logError } from "../utils/logger";
 
@@ -17,8 +18,10 @@ export type ValueRefreshSummary = {
 
 type RefreshOptions = { force?: boolean };
 
-function groupEvents(events: EventValueCandidate[]): Map<string, EventValueCandidate[]> {
-  const groups = new Map<string, EventValueCandidate[]>();
+type RefreshCandidate = EventValueCandidate & { needsActual: boolean; needsPrior: boolean };
+
+function groupEvents(events: RefreshCandidate[]): Map<string, RefreshCandidate[]> {
+  const groups = new Map<string, RefreshCandidate[]>();
   for (const event of events) {
     const key = `${event.provider}|${event.eventTimeUtc}`;
     const group = groups.get(key) ?? [];
@@ -39,9 +42,21 @@ export async function refreshDueEventValues(env: Env, now = new Date(), options:
   const fromUtc = new Date(now.getTime() - (options.force ? 7 * 86_400_000 : 48 * 60 * 60_000)).toISOString();
   const candidates = await listEventsMissingValues(env.DB, fromUtc, now.toISOString());
   const due = options.force ? candidates : candidates.filter((event) => isScheduledAttempt(event, now));
-  const groups = groupEvents(due);
+  const syncDaysAhead = Math.max(7, Number(env.SYNC_DAYS_AHEAD ?? 45) || 45);
+  const priorCandidates = options.force
+    ? await listEventsMissingPriors(env.DB, fromUtc, new Date(now.getTime() + syncDaysAhead * 86_400_000).toISOString())
+    : [];
+  const merged = new Map<string, RefreshCandidate>();
+  for (const event of due) merged.set(event.id, { ...event, needsActual: true, needsPrior: false });
+  for (const event of priorCandidates) {
+    const existing = merged.get(event.id);
+    if (existing) existing.needsPrior = true;
+    else merged.set(event.id, { ...event, needsActual: false, needsPrior: true });
+  }
+  const eligible = [...merged.values()];
+  const groups = groupEvents(eligible);
   const summary: ValueRefreshSummary = {
-    checkedEvents: due.length,
+    checkedEvents: eligible.length,
     attemptedSources: groups.size,
     updatedEvents: 0,
     unavailableEvents: 0,
@@ -58,10 +73,12 @@ export async function refreshDueEventValues(env: Env, now = new Date(), options:
         ? await fetchBlsEventValues(events, env, fetchedAt)
         : provider === "umich"
           ? await fetchUmichEventValues(events, fetchedAt)
-          : provider === "eia"
+      : provider === "eia"
             ? await fetchEiaEventValues(events, fetchedAt)
             : provider === "ism"
               ? await fetchIsmEventValues(events, fetchedAt)
+              : provider === "census"
+                ? await fetchCensusEventValues(events, fetchedAt)
             : new Map();
       for (const event of events) {
         const value = values.get(event.id);
@@ -69,7 +86,15 @@ export async function refreshDueEventValues(env: Env, now = new Date(), options:
           summary.unavailableEvents += 1;
           continue;
         }
-        if (await setOfficialEventValues(env.DB, event.id, value)) summary.updatedEvents += 1;
+        let updated = false;
+        if (event.needsActual && value.actualValue != null) {
+          updated = await setOfficialEventValues(env.DB, event.id, value) || updated;
+        }
+        if (event.needsPrior && value.previousValue != null) {
+          updated = await setOfficialEventPrior(env.DB, event.id, { previousValue: value.previousValue, valueUnit: value.valueUnit, valueSourceUrl: value.valueSourceUrl, sourceUpdatedAt: value.sourceUpdatedAt }) || updated;
+        }
+        if (updated) summary.updatedEvents += 1;
+        else if ((event.needsActual && value.actualValue == null) || (event.needsPrior && value.previousValue == null)) summary.unavailableEvents += 1;
       }
       log("info", "event_values_refreshed", { provider, eventTimeUtc, candidates: events.length, updated: values.size }, env);
     } catch (error) {

@@ -1,9 +1,12 @@
 import { fetchBlsEventValues, fetchIsmEventValues, fetchUmichEventValues } from "../providers/release-values";
 import { fetchEiaEventValues } from "../providers/eia";
 import { fetchCensusEventValues } from "../providers/census-values";
-import { latestOfficialActual, listEventsMissingPriors, listEventsMissingValues, setOfficialEventPrior, setOfficialEventValues, type EventValueCandidate } from "../repositories/events";
+import { latestOfficialActual, listEventsMissingPriors, listEventsMissingValues, markEventsSourceError, markEventsValuePending, setOfficialEventPrior, setOfficialEventValues, type EventValueCandidate } from "../repositories/events";
 import type { Env, ProviderName } from "../types";
 import { log, logError } from "../utils/logger";
+import { getRuntimeConfig } from "../config";
+import { fetchBeaEventValues } from "../providers/bea-values";
+import { fetchFederalReserveEventValues } from "../providers/federal-reserve-values";
 
 export type ValueRefreshSummary = {
   checkedEvents: number;
@@ -21,7 +24,7 @@ type RefreshCandidate = EventValueCandidate & { needsActual: boolean; needsPrior
 function groupEvents(events: RefreshCandidate[]): Map<string, RefreshCandidate[]> {
   const groups = new Map<string, RefreshCandidate[]>();
   for (const event of events) {
-    const key = `${event.provider}|${event.eventTimeUtc}`;
+    const key = event.provider;
     const group = groups.get(key) ?? [];
     group.push(event);
     groups.set(key, group);
@@ -37,15 +40,18 @@ function isScheduledAttempt(event: EventValueCandidate, now: Date): boolean {
 }
 
 export async function refreshDueEventValues(env: Env, now = new Date(), options: RefreshOptions = {}): Promise<ValueRefreshSummary> {
+  const config = await getRuntimeConfig(env);
   // Keep a recovery window so a delayed deploy or missed Cron does not leave
   // an official release permanently stuck without values.
   const fromUtc = new Date(now.getTime() - (options.force ? 7 * 86_400_000 : 48 * 60 * 60_000)).toISOString();
   const candidates = await listEventsMissingValues(env.DB, fromUtc, now.toISOString());
   const due = options.force ? candidates : candidates.filter((event) => isScheduledAttempt(event, now));
-  const syncDaysAhead = Math.max(7, Number(env.SYNC_DAYS_AHEAD ?? 45) || 45);
-  const priorCandidates = options.force
-    ? await listEventsMissingPriors(env.DB, fromUtc, new Date(now.getTime() + syncDaysAhead * 86_400_000).toISOString())
-    : [];
+  const syncDaysAhead = Math.max(7, config.syncDaysAhead);
+  const priorCandidates = await listEventsMissingPriors(
+    env.DB,
+    fromUtc,
+    options.force ? new Date(now.getTime() + syncDaysAhead * 86_400_000).toISOString() : now.toISOString(),
+  );
   const merged = new Map<string, RefreshCandidate>();
   for (const event of due) merged.set(event.id, { ...event, needsActual: true, needsPrior: false });
   for (const event of priorCandidates) {
@@ -65,6 +71,7 @@ export async function refreshDueEventValues(env: Env, now = new Date(), options:
     if (!event.needsActual && !event.needsPrior) merged.delete(id);
   }
   const eligible = [...merged.values()];
+  await markEventsValuePending(env.DB, eligible.filter((event) => event.needsActual && new Date(event.eventTimeUtc).getTime() <= now.getTime()).map((event) => event.id), now.toISOString());
   const groups = groupEvents(eligible);
   const summary: ValueRefreshSummary = {
     checkedEvents: eligible.length,
@@ -77,11 +84,18 @@ export async function refreshDueEventValues(env: Env, now = new Date(), options:
 
   for (const events of groups.values()) {
     const provider = events[0].provider;
-    const eventTimeUtc = events[0].eventTimeUtc;
+    const releaseTimes = events.map((event) => event.eventTimeUtc).sort();
+    const eventTimeUtc = releaseTimes[0] === releaseTimes[releaseTimes.length - 1]
+      ? releaseTimes[0]
+      : `${releaseTimes[0]}..${releaseTimes[releaseTimes.length - 1]}`;
     const fetchedAt = now.toISOString();
     try {
       const values = provider === "bls"
         ? await fetchBlsEventValues(events, env, fetchedAt)
+        : provider === "bea"
+          ? await fetchBeaEventValues(events, env, fetchedAt)
+        : provider === "federal_reserve"
+          ? await fetchFederalReserveEventValues(events, env, fetchedAt)
         : provider === "umich"
           ? await fetchUmichEventValues(events, fetchedAt)
       : provider === "eia"
@@ -99,10 +113,10 @@ export async function refreshDueEventValues(env: Env, now = new Date(), options:
         }
         let updated = false;
         if (event.needsActual && value.actualValue != null) {
-          updated = await setOfficialEventValues(env.DB, event.id, value) || updated;
+          updated = await setOfficialEventValues(env.DB, event.id, value, config.notificationChannels) || updated;
         }
         if (event.needsPrior && value.previousValue != null) {
-          updated = await setOfficialEventPrior(env.DB, event.id, { previousValue: value.previousValue, valueUnit: value.valueUnit, valueSourceUrl: value.valueSourceUrl, sourceUpdatedAt: value.sourceUpdatedAt }) || updated;
+          updated = await setOfficialEventPrior(env.DB, event.id, { previousValue: value.previousValue, valueUnit: value.valueUnit, valueSourceUrl: value.valueSourceUrl, sourceUpdatedAt: value.sourceUpdatedAt, releasePeriod: value.releasePeriod ?? null }) || updated;
         }
         if (updated) summary.updatedEvents += 1;
         else if ((event.needsActual && value.actualValue == null) || (event.needsPrior && value.previousValue == null)) summary.unavailableEvents += 1;
@@ -112,6 +126,7 @@ export async function refreshDueEventValues(env: Env, now = new Date(), options:
       const message = error instanceof Error ? error.message : "unknown value refresh error";
       summary.failedEvents += events.length;
       summary.errors.push({ provider, eventTimeUtc, message });
+      await markEventsSourceError(env.DB, events.filter((event) => event.needsActual).map((event) => event.id), new Date().toISOString());
       logError("event_values_refresh_failed", error, { provider, eventTimeUtc, candidates: events.length }, env);
     }
   }

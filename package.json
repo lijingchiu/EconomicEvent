@@ -1,8 +1,8 @@
 {
   "name": "us-economic-event-alerts",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "Cloudflare Workers + D1 official US economic release alerts for Discord",
+  "description": "Cloudflare Workers + D1 official US economic calendar, values, and multichannel alerts",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",

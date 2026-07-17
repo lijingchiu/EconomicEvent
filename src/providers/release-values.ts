@@ -15,11 +15,13 @@ export type ReleaseValue = {
   valueUnit: string | null;
   valueSourceUrl: string;
   sourceUpdatedAt: string;
+  releasePeriod?: string | null;
 };
 
-export type ReleaseValueEvent = Pick<EconomicEvent, "id" | "name" | "eventTimeUtc">;
+export type ReleaseValueEvent = Pick<EconomicEvent, "id" | "name" | "eventTimeUtc"> & Pick<Partial<EconomicEvent>, "description">;
 
 type YearMonth = { year: number; month: number };
+type YearQuarter = { year: number; quarter: number };
 type BlsDatum = { year: string; period: string; value: string };
 type BlsSeries = { seriesID: string; data: BlsDatum[] };
 type BlsResponse = {
@@ -36,7 +38,12 @@ const BLS_SERIES_BY_METRIC: Record<string, string[]> = {
   "PPI MoM": ["WPSFD4"],
   "Non Farm Payrolls": ["CES0000000001"],
   "Unemployment Rate": ["LNS14000000"],
-  "JOLTs Job Openings": ["JTS00000000JOL"],
+  "JOLTs Job Openings": ["JTS000000000000000JOL"],
+  "Employment Cost Index QoQ": ["CIS1010000000000Q"],
+  "Nonfarm Productivity QoQ Prel": ["PRS85006092"],
+  "Unit Labor Costs QoQ Prel": ["PRS85006112"],
+  "Nonfarm Productivity QoQ Revised": ["PRS85006092"],
+  "Unit Labor Costs QoQ Revised": ["PRS85006112"],
 };
 
 function zonedYearMonth(iso: string): YearMonth {
@@ -60,6 +67,38 @@ function periodKey(period: YearMonth): string {
   return `${period.year}-M${String(period.month).padStart(2, "0")}`;
 }
 
+function quarterKey(period: YearQuarter): string {
+  return `${period.year}-Q${String(period.quarter).padStart(2, "0")}`;
+}
+
+function shiftQuarter(period: YearQuarter, delta: number): YearQuarter {
+  const index = period.year * 4 + period.quarter - 1 + delta;
+  return { year: Math.floor(index / 4), quarter: ((index % 4) + 4) % 4 + 1 };
+}
+
+function eventQuarter(event: ReleaseValueEvent): YearQuarter | null {
+  const source = `${event.description ?? ""} ${event.name}`;
+  const match = /\b(first|second|third|fourth|1st|2nd|3rd|4th)\s+quarter\s+(\d{4})\b/i.exec(source);
+  if (match) {
+    const quarter = ["first", "1st", "second", "2nd", "third", "3rd", "fourth", "4th"].indexOf(match[1].toLowerCase());
+    return { year: Number(match[2]), quarter: Math.floor(quarter / 2) + 1 };
+  }
+  const delta = event.name === "Employment Cost Index QoQ"
+    ? -1
+    : /\bQoQ Prel$/.test(event.name)
+      ? -2
+      : /\bQoQ Revised$/.test(event.name)
+        ? -3
+        : null;
+  if (delta == null) return null;
+  const referenceMonth = shiftMonth(zonedYearMonth(event.eventTimeUtc), delta);
+  return { year: referenceMonth.year, quarter: Math.ceil(referenceMonth.month / 3) };
+}
+
+function expectedMonthlyPeriod(event: ReleaseValueEvent): YearMonth {
+  return shiftMonth(zonedYearMonth(event.eventTimeUtc), event.name === "JOLTs Job Openings" ? -2 : -1);
+}
+
 function seriesValues(series: BlsSeries | undefined): Map<string, number> {
   const values = new Map<string, number>();
   for (const item of series?.data ?? []) {
@@ -81,6 +120,22 @@ function percentChange(current: number | undefined, comparison: number | undefin
 
 function valueAt(values: Map<string, number>, period: YearMonth): number | undefined {
   return values.get(periodKey(period));
+}
+
+function quarterlyMetricValue(event: ReleaseValueEvent, series: Map<string, Map<string, number>>): (Pick<ReleaseValue, "actualValue" | "previousValue" | "valueUnit"> & { releasePeriod: string }) | null {
+  const period = eventQuarter(event);
+  const seriesId = BLS_SERIES_BY_METRIC[event.name]?.[0];
+  const values = seriesId ? series.get(seriesId) : undefined;
+  if (!period || !values) return null;
+  const actual = values.get(quarterKey(period));
+  const prior = values.get(quarterKey(shiftQuarter(period, -1)));
+  if (actual == null && prior == null) return null;
+  return {
+    actualValue: actual == null ? null : oneDecimal(actual),
+    previousValue: prior == null ? null : oneDecimal(prior),
+    valueUnit: "%",
+    releasePeriod: quarterKey(period),
+  };
 }
 
 function metricValue(name: string, series: Map<string, Map<string, number>>, period: YearMonth): Pick<ReleaseValue, "actualValue" | "previousValue" | "valueUnit"> | null {
@@ -135,14 +190,15 @@ export function buildBlsEventValues(events: ReleaseValueEvent[], response: BlsRe
   if (response.status !== "REQUEST_SUCCEEDED") {
     throw new Error(`BLS API request failed: ${(response.message ?? []).join("; ") || response.status || "unknown status"}`);
   }
-  const expectedPeriod = shiftMonth(zonedYearMonth(events[0].eventTimeUtc), -1);
   const series = new Map((response.Results?.series ?? []).map((item) => [item.seriesID, seriesValues(item)]));
   const values = new Map<string, ReleaseValue>();
   for (const event of events) {
-    const metric = metricValue(event.name, series, expectedPeriod);
+    const quarterly = /\bQoQ\b/.test(event.name) ? quarterlyMetricValue(event, series) : null;
+    const expectedPeriod = expectedMonthlyPeriod(event);
+    const metric = quarterly ?? metricValue(event.name, series, expectedPeriod);
     if (metric) {
       const future = new Date(event.eventTimeUtc).getTime() > new Date(fetchedAt).getTime();
-      values.set(event.id, { ...metric, actualValue: future ? null : metric.actualValue, previousValue: future ? metric.actualValue ?? metric.previousValue : metric.previousValue, valueSourceUrl: BLS_API_URL, sourceUpdatedAt: fetchedAt });
+      values.set(event.id, { ...metric, actualValue: future ? null : metric.actualValue, previousValue: future ? metric.actualValue ?? metric.previousValue : metric.previousValue, valueSourceUrl: BLS_API_URL, sourceUpdatedAt: fetchedAt, releasePeriod: quarterly?.releasePeriod ?? periodKey(expectedPeriod) });
     }
   }
   return values;
@@ -152,11 +208,11 @@ export async function fetchBlsEventValues(events: ReleaseValueEvent[], env: Env,
   if (!events.length) return new Map();
   const seriesIds = [...new Set(events.flatMap((event) => BLS_SERIES_BY_METRIC[event.name] ?? []))];
   if (!seriesIds.length) return new Map();
-  const expectedPeriod = shiftMonth(zonedYearMonth(events[0].eventTimeUtc), -1);
+  const years = events.map((event) => eventQuarter(event)?.year ?? expectedMonthlyPeriod(event).year);
   const body: Record<string, unknown> = {
     seriesid: seriesIds,
-    startyear: String(expectedPeriod.year - 2),
-    endyear: String(expectedPeriod.year),
+    startyear: String(Math.min(...years) - 2),
+    endyear: String(Math.max(...years)),
   };
   if (env.BLS_API_KEY) body.registrationkey = env.BLS_API_KEY;
   const response = await fetchWithTimeout(BLS_API_URL, {
@@ -190,6 +246,7 @@ export function parseUmichEventValue(event: ReleaseValueEvent, html: string, fet
     valueUnit: null,
     valueSourceUrl: UMICH_VALUES_URL,
     sourceUpdatedAt: fetchedAt,
+    releasePeriod: `${expected.year}-${String(expected.month).padStart(2, "0")}`,
   };
 }
 
@@ -210,7 +267,7 @@ export async function fetchUmichEventValues(events: ReleaseValueEvent[], fetched
     const expected = zonedYearMonth(event.eventTimeUtc);
     const sourceIsEarlier = latest && (latest.year < expected.year || (latest.year === expected.year && latest.month < expected.month) || (latest.year === expected.year && latest.month === expected.month && latest.phase === "preliminary" && /final/i.test(event.name)));
     if (isFuture && sourceIsEarlier && latest) {
-      values.set(event.id, { actualValue: null, previousValue: latest.value, valueUnit: null, valueSourceUrl: UMICH_VALUES_URL, sourceUpdatedAt: fetchedAt });
+      values.set(event.id, { actualValue: null, previousValue: latest.value, valueUnit: null, valueSourceUrl: UMICH_VALUES_URL, sourceUpdatedAt: fetchedAt, releasePeriod: `${expected.year}-${String(expected.month).padStart(2, "0")}` });
     }
   }
   return values;
@@ -259,6 +316,7 @@ export function parseIsmEventValue(event: ReleaseValueEvent, html: string, fetch
     valueUnit: "%",
     valueSourceUrl,
     sourceUpdatedAt: fetchedAt,
+    releasePeriod: periodKey(shiftMonth(zonedYearMonth(event.eventTimeUtc), -1)),
   };
 }
 

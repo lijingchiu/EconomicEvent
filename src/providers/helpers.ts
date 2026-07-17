@@ -72,6 +72,11 @@ export function releaseMetricNames(name: string): string[] {
   if (/producer price index|\bppi\b/.test(normalized)) return ["PPI MoM"];
   if (/employment situation|\bnfp\b|non.?farm payroll/.test(normalized)) return ["Non Farm Payrolls", "Unemployment Rate"];
   if (/job openings and labor turnover|\bjolts?\b/.test(normalized)) return ["JOLTs Job Openings"];
+  if (/employment cost index/.test(normalized)) return ["Employment Cost Index QoQ"];
+  if (/productivity and costs/.test(normalized)) {
+    const phase = /\(\s*r\s*\)|\brevised\b/.test(normalized) ? "Revised" : "Prel";
+    return [`Nonfarm Productivity QoQ ${phase}`, `Unit Labor Costs QoQ ${phase}`];
+  }
   if (/personal income and outlays/.test(normalized)) return ["Core PCE Price Index MoM", "Personal Income MoM", "Personal Spending MoM"];
   if (/gross domestic product|\bgdp\b/.test(normalized)) return [/advance|1st|first/.test(normalized) ? "GDP Growth Rate QoQ Adv" : "GDP Growth Rate QoQ"];
   if (/retail sales|monthly sales for retail/.test(normalized)) return ["Retail Sales MoM"];

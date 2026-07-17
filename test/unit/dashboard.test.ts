@@ -12,5 +12,19 @@ describe("dashboard language switcher", () => {
     expect(html).toContain("i18n['上次同步']='Last sync'");
     expect(html).toContain("textContent=tr('即將公布')");
     expect(html).toContain("Supported quantitative events automatically sync Actual / Prior");
+    expect(html).toContain('id="control-center"');
+    expect(html).toContain('id="event-detail"');
+    expect(html).toContain("prefers-reduced-motion:reduce");
+    expect(html).toContain("/auth/session");
+    expect(html).not.toContain("sessionStorage.setItem(tokenKey");
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
+    expect(scripts.length).toBeGreaterThan(0);
+    expect(() => scripts.forEach((script) => new Function(script))).not.toThrow();
+
+    const qualitativePattern = html.match(/var qualitative=function\(event\)\{return \/(.*?)\/i\.test/);
+    expect(qualitativePattern).not.toBeNull();
+    const isQualitative = new RegExp(qualitativePattern?.[1] ?? "", "i");
+    expect(isQualitative.test("FOMC Press Conference")).toBe(true);
+    expect(isQualitative.test("Retail Sales MoM")).toBe(false);
   });
 });

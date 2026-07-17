@@ -33,7 +33,7 @@
     "NOTIFICATIONS_ENABLED": "true"
   },
   "secrets": {
-    "required": ["DISCORD_WEBHOOK_URL", "ADMIN_TOKEN"]
+    "required": ["ADMIN_TOKEN"]
   },
   "triggers": {
     "crons": [

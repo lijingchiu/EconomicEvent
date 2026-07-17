@@ -1,2 +1,28 @@
-DISCORD_WEBHOOK_URL=replace_me
-ADMIN_TOKEN=replace_me
+# Required for local admin login and signed sessions.
+ADMIN_TOKEN=replace_with_a_long_random_value
+
+# Optional official API keys. BLS works without a key at lower limits.
+BLS_API_KEY=
+BEA_API_KEY=
+
+# Enable only the notification channels whose complete credential set exists.
+DISCORD_WEBHOOK_URL=
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+SLACK_WEBHOOK_URL=
+LINE_CHANNEL_ACCESS_TOKEN=
+LINE_USER_ID=
+
+# Generic JSON email gateway.
+EMAIL_API_URL=
+EMAIL_API_KEY=
+EMAIL_FROM=
+EMAIL_TO=
+
+# Generic JSON Web Push gateway, not a VAPID private key.
+WEB_PUSH_GATEWAY_URL=
+WEB_PUSH_API_KEY=
+
+# Optional Cloudflare Access JWT validation.
+CF_ACCESS_TEAM_DOMAIN=
+CF_ACCESS_AUD=

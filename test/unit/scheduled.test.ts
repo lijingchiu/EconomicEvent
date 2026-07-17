@@ -5,6 +5,7 @@ vi.mock("../../src/services/notification-checker", () => ({ checkDueNotification
 vi.mock("../../src/services/value-refresh", () => ({ refreshDueEventValues: vi.fn() }));
 vi.mock("../../src/services/provider-sync", () => ({ syncProviders: vi.fn(), cleanupDatabase: vi.fn() }));
 vi.mock("../../src/services/provider-health-alert", () => ({ sendProviderHealthAlerts: vi.fn() }));
+vi.mock("../../src/services/daily-digest", () => ({ maybeSendDailyDigest: vi.fn().mockResolvedValue({ sent: 0, skipped: true }) }));
 vi.mock("../../src/utils/logger", () => ({ log: vi.fn(), logError: vi.fn() }));
 
 import { checkDueNotifications } from "../../src/services/notification-checker";

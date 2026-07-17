@@ -1,10 +1,13 @@
 import type { AppConfig, Env, ProviderName, ProviderSyncSummary } from "../types";
 import { getRuntimeConfig } from "../config";
 import { createProviders } from "../providers";
-import { upsertEconomicEvent } from "../repositories/events";
+import { markMissingProviderEventsCancelled, upsertEconomicEvent } from "../repositories/events";
 import { completeSyncRun, startSyncRun } from "../repositories/sync-runs";
 import { recordProviderFailure, recordProviderSuccess } from "../repositories/provider-health";
 import { log, logError } from "../utils/logger";
+import { applyExclusionRules, recordSourceSnapshot } from "../repositories/source-records";
+
+const PARSER_VERSION = "2026-07-17.1";
 
 export async function syncProviders(env: Env, requestedProviders?: ProviderName[], options: { now?: Date; full?: boolean } = {}): Promise<ProviderSyncSummary[]> {
   const config = await getRuntimeConfig(env);
@@ -19,20 +22,28 @@ export async function syncProviders(env: Env, requestedProviders?: ProviderName[
     const runId = await startSyncRun(env.DB, provider.name, provider.sourceUrl, startedAt);
     try {
       const result = await provider.fetchEvents({ fromUtc, toUtc }, env, config);
+      const filtered = await applyExclusionRules(env.DB, provider.name, result.events);
       let insertedCount = 0;
       let updatedCount = 0;
-      for (const event of result.events) {
+      for (const event of filtered.accepted) {
         const change = await upsertEconomicEvent(env.DB, event, config);
         if (change === "inserted") insertedCount += 1; else updatedCount += 1;
       }
       const sourceFailed = result.warnings.some((warning) => warning.code === "source_fetch_failed");
       const summary: ProviderSyncSummary = {
         provider: provider.name, sourceUrl: result.sourceUrl, status: sourceFailed && result.events.length === 0 ? "failed" : result.warnings.length ? "partial" : "success",
-        receivedCount: result.events.length, acceptedCount: result.events.length, skippedCount: result.warnings.filter((warning) => warning.code === "missing_required_field" || warning.code === "invalid_event_time").length,
+        receivedCount: result.events.length, acceptedCount: filtered.accepted.length, skippedCount: result.warnings.filter((warning) => warning.code === "missing_required_field" || warning.code === "invalid_event_time").length + filtered.excluded.length,
         insertedCount, updatedCount, warningCount: result.warnings.length,
         errorMessage: sourceFailed ? result.warnings.find((warning) => warning.code === "source_fetch_failed")?.message : undefined,
       };
+      // Reconcile cancellations only when the complete official source parsed cleanly.
+      // A partial response can omit valid events and must never cancel them.
+      if (summary.status === "success" && filtered.accepted.length > 0) {
+        const cancelledCount = await markMissingProviderEventsCancelled(env.DB, provider.name, fromUtc.toISOString(), toUtc.toISOString(), filtered.accepted.map((event) => event.id), new Date().toISOString());
+        if (cancelledCount) summary.skippedCount += cancelledCount;
+      }
       await completeSyncRun(env.DB, runId, summary, new Date().toISOString());
+      await recordSourceSnapshot(env.DB, result, PARSER_VERSION, summary.status, summary.errorMessage).catch((error) => logError("source_snapshot", error, { provider: provider.name }, env));
       if (summary.status === "failed") await recordProviderFailure(env.DB, provider.name, new Date().toISOString(), summary.errorMessage ?? "provider source failed", result.events.length);
       else await recordProviderSuccess(env.DB, provider.name, new Date().toISOString(), result.events.length);
       summaries.push(summary);
@@ -40,6 +51,13 @@ export async function syncProviders(env: Env, requestedProviders?: ProviderName[
     } catch (error) {
       const summary: ProviderSyncSummary = { provider: provider.name, sourceUrl: provider.sourceUrl, status: "failed", receivedCount: 0, acceptedCount: 0, skippedCount: 0, insertedCount: 0, updatedCount: 0, warningCount: 1, errorMessage: error instanceof Error ? error.message : "provider sync failed" };
       await completeSyncRun(env.DB, runId, summary, new Date().toISOString());
+      await recordSourceSnapshot(env.DB, {
+        provider: provider.name,
+        fetchedAtUtc: new Date().toISOString(),
+        sourceUrl: provider.sourceUrl,
+        events: [],
+        warnings: [{ code: "source_fetch_failed", message: summary.errorMessage ?? "provider sync failed", provider: provider.name, sourceUrl: provider.sourceUrl }],
+      }, PARSER_VERSION, "failed", summary.errorMessage).catch((snapshotError) => logError("source_snapshot", snapshotError, { provider: provider.name }, env));
       await recordProviderFailure(env.DB, provider.name, new Date().toISOString(), summary.errorMessage ?? "provider sync failed");
       summaries.push(summary);
       logError("provider_sync", error, { provider: provider.name, sourceUrl: provider.sourceUrl }, env);
@@ -51,8 +69,10 @@ export async function syncProviders(env: Env, requestedProviders?: ProviderName[
 export async function cleanupDatabase(env: Env, now = new Date().toISOString()): Promise<void> {
   const eventThreshold = new Date(new Date(now).getTime() - 120 * 86_400_000).toISOString();
   const syncThreshold = new Date(new Date(now).getTime() - 180 * 86_400_000).toISOString();
+  const snapshotThreshold = new Date(new Date(now).getTime() - 30 * 86_400_000).toISOString();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM economic_events WHERE event_time_utc < ?").bind(eventThreshold),
     env.DB.prepare("DELETE FROM provider_sync_runs WHERE started_at < ?").bind(syncThreshold),
+    env.DB.prepare("DELETE FROM source_snapshots WHERE fetched_at < ?").bind(snapshotThreshold),
   ]);
 }

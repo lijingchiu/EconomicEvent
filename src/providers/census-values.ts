@@ -13,6 +13,7 @@ export type CensusReleaseValue = {
   valueUnit: string | null;
   valueSourceUrl: string;
   sourceUpdatedAt: string;
+  releasePeriod?: string | null;
 };
 
 export type CensusReleaseEvent = Pick<EconomicEvent, "id" | "name" | "eventTimeUtc">;
@@ -125,7 +126,7 @@ export async function fetchCensusEventValues(events: CensusReleaseEvent[], fetch
       const metric = snapshot.metrics[event.name];
       if (!metric) continue;
       const eventDate = localDate(event.eventTimeUtc);
-      if (eventDate === snapshot.releaseDate) values.set(event.id, { ...metric, valueUnit: "units", valueSourceUrl: CENSUS_RESIDENTIAL_VALUES_URL, sourceUpdatedAt });
+      if (eventDate === snapshot.releaseDate) values.set(event.id, { ...metric, valueUnit: "units", valueSourceUrl: CENSUS_RESIDENTIAL_VALUES_URL, sourceUpdatedAt, releasePeriod: snapshot.releasePeriod });
       else if (eventDate > snapshot.releaseDate && new Date(event.eventTimeUtc).getTime() > new Date(fetchedAt).getTime()) values.set(event.id, { actualValue: null, previousValue: metric.actualValue, valueUnit: "units", valueSourceUrl: CENSUS_RESIDENTIAL_VALUES_URL, sourceUpdatedAt });
     }
   }
@@ -136,7 +137,7 @@ export async function fetchCensusEventValues(events: CensusReleaseEvent[], fetch
     const sourceUpdatedAt = dateAndTimeToUtc(snapshot.releaseDate, "8:30 AM");
     for (const event of retail) {
       const eventDate = localDate(event.eventTimeUtc);
-      if (eventDate === snapshot.releaseDate) values.set(event.id, { actualValue: snapshot.actualValue, previousValue: snapshot.previousValue, valueUnit: "%", valueSourceUrl: CENSUS_RETAIL_VALUES_URL, sourceUpdatedAt });
+      if (eventDate === snapshot.releaseDate) values.set(event.id, { actualValue: snapshot.actualValue, previousValue: snapshot.previousValue, valueUnit: "%", valueSourceUrl: CENSUS_RETAIL_VALUES_URL, sourceUpdatedAt, releasePeriod: snapshot.releasePeriod });
       else if (eventDate > snapshot.releaseDate && new Date(event.eventTimeUtc).getTime() > new Date(fetchedAt).getTime()) values.set(event.id, { actualValue: null, previousValue: snapshot.actualValue, valueUnit: "%", valueSourceUrl: CENSUS_RETAIL_VALUES_URL, sourceUpdatedAt });
     }
   }
@@ -147,7 +148,7 @@ export async function fetchCensusEventValues(events: CensusReleaseEvent[], fetch
     const sourceUpdatedAt = dateAndTimeToUtc(snapshot.releaseDate, "8:30 AM");
     for (const event of durable) {
       const eventDate = localDate(event.eventTimeUtc);
-      if (eventDate === snapshot.releaseDate) values.set(event.id, { actualValue: snapshot.actualValue, previousValue: snapshot.previousValue, valueUnit: "%", valueSourceUrl: CENSUS_DURABLE_VALUES_URL, sourceUpdatedAt });
+      if (eventDate === snapshot.releaseDate) values.set(event.id, { actualValue: snapshot.actualValue, previousValue: snapshot.previousValue, valueUnit: "%", valueSourceUrl: CENSUS_DURABLE_VALUES_URL, sourceUpdatedAt, releasePeriod: snapshot.releasePeriod });
       else if (eventDate > snapshot.releaseDate && new Date(event.eventTimeUtc).getTime() > new Date(fetchedAt).getTime()) values.set(event.id, { actualValue: null, previousValue: snapshot.actualValue, valueUnit: "%", valueSourceUrl: CENSUS_DURABLE_VALUES_URL, sourceUpdatedAt });
     }
   }

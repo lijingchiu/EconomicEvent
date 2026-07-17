@@ -8,16 +8,19 @@ import { eventFromRelease, dateAndTimeToUtc, inRange, parseDateOnly, releaseMetr
 const WPSR_SCHEDULE_URL = "https://www.eia.gov/petroleum/supply/weekly/schedule.php";
 const WPSR_REPORT_URL = "https://www.eia.gov/petroleum/supply/weekly/";
 const WPSR_VALUES_URL = "https://ir.eia.gov/wpsr/table1.csv";
+const WPSR_STOCK_HISTORY_URL = "https://www.eia.gov/dnav/pet/pet_stoc_wstk_dcu_nus_w.htm";
 const WNGSR_SCHEDULE_URL = "https://ir.eia.gov/ngs/schedule.html";
 const WNGSR_REPORT_URL = "https://ir.eia.gov/ngs/ngs.html";
 const WNGSR_VALUES_URL = "https://ir.eia.gov/ngs/wngsr.json";
+const WNGSR_STOCK_HISTORY_URL = "https://www.eia.gov/dnav/ng/ng_stor_wkly_s1_w.htm";
 
 type MetricSnapshot = {
   actualValue: string;
-  previousValue: string;
+  previousValue: string | null;
   valueUnit: string;
   valueSourceUrl: string;
   sourceUpdatedAt: string;
+  releasePeriod: string | null;
 };
 
 type SnapshotBundle = {
@@ -113,6 +116,31 @@ function parseCsvRows(text: string): string[][] {
   return text.replace(/^\uFEFF/, "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map(parseCsvLine);
 }
 
+function dashboardReleaseDate(html: string): string {
+  const match = /Release Date:\s*(\d{1,2}\/\d{1,2}\/\d{4})/i.exec(htmlToText(html));
+  if (!match) throw new Error("EIA stock dashboard release date not found");
+  return parseDateOnly(match[1]);
+}
+
+function dashboardLevels(html: string, label: string): number[] {
+  const expected = normalizeLabel(label);
+  const starts = [...html.matchAll(/<tr\b[^>]*class=["'][^"']*\bDataRow\b[^"']*["'][^>]*>/gi)];
+  const rows = starts.map((match, index) => html.slice(match.index, starts[index + 1]?.index ?? html.length));
+  for (const row of rows) {
+    const rowText = normalizeLabel(htmlToText(row));
+    if (!rowText.startsWith(expected)) continue;
+    const values = [...row.matchAll(/<td\b[^>]*class=["'][^"']*\b(?:DataB|Current2)\b[^"']*["'][^>]*>([\s\S]*?)<\/td>/gi)]
+      .map((match) => parseNumber(htmlToText(match[1])));
+    if (values.length >= 3) return values;
+  }
+  throw new Error(`EIA stock dashboard row not found: ${label}`);
+}
+
+function previousWeeklyChange(html: string, label: string, divisor = 1): number {
+  const levels = dashboardLevels(html, label);
+  return (levels[levels.length - 2] - levels[levels.length - 3]) / divisor;
+}
+
 function parseNumber(value: string): number {
   const parsed = Number(value.replace(/,/g, "").trim());
   if (!Number.isFinite(parsed)) throw new Error(`invalid numeric value: ${value}`);
@@ -143,6 +171,7 @@ export type EiaReleaseValue = {
   valueUnit: string | null;
   valueSourceUrl: string;
   sourceUpdatedAt: string;
+  releasePeriod?: string | null;
 };
 
 export type EiaReleaseEvent = Pick<EconomicEvent, "id" | "name" | "eventTimeUtc">;
@@ -163,7 +192,12 @@ function parseEiaDate(value: string): string {
 }
 
 async function fetchText(url: string, init: RequestInit, errorMessage: string): Promise<string> {
-  const response = await fetchWithTimeout(url, init);
+  let response = await fetchWithTimeout(url, { ...init, redirect: "manual" });
+  if (response.status >= 300 && response.status < 400) {
+    const location = response.headers.get("location");
+    if (!location) throw new Error(`${errorMessage} returned a redirect without a location`);
+    response = await fetchWithTimeout(new URL(location, url), { ...init, redirect: "follow" });
+  }
   const body = await readBodyWithLimit(response);
   if (!response.ok) throw new Error(`${errorMessage} (HTTP ${response.status})`);
   if (!body.trim()) throw new Error(`${errorMessage} returned an empty response`);
@@ -191,7 +225,7 @@ export async function fetchEiaEventValues(events: EiaReleaseEvent[], fetchedAt =
     }
     if (event.name === "Natural Gas Storage" && wngsr && localDate > wngsr.releaseDate) {
       const metric = wngsr.metrics[event.name];
-      if (metric) values.set(event.id, { ...metric.values, actualValue: null, previousValue: metric.values.actualValue });
+        if (metric) values.set(event.id, { ...metric.values, actualValue: null, previousValue: metric.values.actualValue, releasePeriod: null });
       continue;
     }
     if ((event.name === WPSR_RELEASE_NAME || event.name === "Crude Oil Inventories" || event.name === "Gasoline Inventories" || event.name === "Distillate Inventories") && wpsr?.releaseDate === localDate) {
@@ -205,49 +239,87 @@ export async function fetchEiaEventValues(events: EiaReleaseEvent[], fetchedAt =
     if ((event.name === WPSR_RELEASE_NAME || event.name === "Crude Oil Inventories" || event.name === "Gasoline Inventories" || event.name === "Distillate Inventories") && wpsr && localDate > wpsr.releaseDate) {
       const metricName = event.name === WPSR_RELEASE_NAME ? "Crude Oil Inventories" : event.name;
       const metric = wpsr.metrics[metricName];
-      if (metric) values.set(event.id, { ...metric.values, actualValue: null, previousValue: metric.values.actualValue });
+        if (metric) values.set(event.id, { ...metric.values, actualValue: null, previousValue: metric.values.actualValue, releasePeriod: null });
     }
   }
   return values;
 }
 
-function buildWpsrSnapshot(reportHtml: string, csvBody: string): SnapshotBundle {
+function buildWpsrSnapshot(reportHtml: string, csvBody: string, stockHistoryHtml: string): SnapshotBundle {
   const reportText = htmlToText(reportHtml);
-  const releaseMatch = /Data for week ending\s+[A-Za-z]+\s+\d{1,2},\s+\d{4}\s+Release Date:\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})/i.exec(reportText);
+  const releaseMatch = /Data for week ending\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})\s+Release Date:\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})/i.exec(reportText);
   if (!releaseMatch) throw new Error("WPSR release date not found");
-  const releaseDate = parseDateOnly(releaseMatch[1]);
+  const releasePeriod = parseDateOnly(releaseMatch[1]);
+  const releaseDate = parseDateOnly(releaseMatch[2]);
+  if (dashboardReleaseDate(stockHistoryHtml) !== releaseDate) throw new Error("WPSR stock dashboard is not updated for the current release");
   const sourceUpdatedAt = dateAndTimeToUtc(releaseDate, "10:30 AM");
   const rows = new Map(parseCsvRows(csvBody).map((row) => [normalizeLabel(row[0] ?? ""), row]));
   const specs = [
-    { metricName: "Crude Oil Inventories", rowLabel: "Crude Oil", descriptionLabel: "Crude oil inventories" },
-    { metricName: "Gasoline Inventories", rowLabel: "Total Motor Gasoline", descriptionLabel: "Gasoline inventories" },
-    { metricName: "Distillate Inventories", rowLabel: "Distillate Fuel Oil", descriptionLabel: "Distillate inventories" },
+    { metricName: "Crude Oil Inventories", rowLabel: "Commercial (Excluding SPR)", historyLabel: "Commercial Crude Oil (Excl. Lease Stock)", descriptionLabel: "Commercial crude oil inventories excluding the SPR" },
+    { metricName: "Gasoline Inventories", rowLabel: "Total Motor Gasoline", historyLabel: "Total Motor Gasoline", descriptionLabel: "Gasoline inventories" },
+    { metricName: "Distillate Inventories", rowLabel: "Distillate Fuel Oil", historyLabel: "Distillate Fuel Oil", descriptionLabel: "Distillate inventories" },
   ] as const;
   const metrics: SnapshotBundle["metrics"] = {};
   for (const spec of specs) {
     const row = rows.get(normalizeLabel(spec.rowLabel));
     if (!row || row.length < 7) throw new Error(`WPSR row not found: ${spec.rowLabel}`);
-    const actual = parseNumber(row[1]);
-    const previous = parseNumber(row[2]);
+    const stockLevel = parseNumber(row[1]);
     const weekChange = parseNumber(row[3]);
+    const priorWeekChange = previousWeeklyChange(stockHistoryHtml, spec.historyLabel, 1000);
     const yearChange = parseNumber(row[6]);
     metrics[spec.metricName] = {
       values: {
-        actualValue: formatNumber(actual, 1),
-        previousValue: formatNumber(previous, 1),
+        actualValue: formatNumber(weekChange, 3),
+        previousValue: formatNumber(priorWeekChange, 3),
         valueUnit: "million barrels",
         valueSourceUrl: WPSR_REPORT_URL,
         sourceUpdatedAt,
+        releasePeriod,
       },
-      description: `${spec.descriptionLabel} were ${formatNumber(actual, 1)} million barrels, ${directionPhrase(weekChange, "million barrels", "from the prior week", 1)} and ${comparisonPhrase(yearChange, "million barrels", "the year-ago level", 1)}.`,
+      description: `${spec.descriptionLabel} ${directionPhrase(weekChange, "million barrels", "from the prior week", 3)} to ${formatNumber(stockLevel, 3)} million barrels and were ${comparisonPhrase(yearChange, "million barrels", "the year-ago level", 3)}.`,
     };
   }
   return { releaseDate, metrics };
 }
 
-function buildWngsrSnapshot(jsonBody: string): SnapshotBundle {
-  const payload = JSON.parse(jsonBody) as Record<string, unknown>;
+function buildWpsrSnapshotFromHistory(reportHtml: string, stockHistoryHtml: string): SnapshotBundle {
+  const reportText = htmlToText(reportHtml);
+  const releaseMatch = /Data for week ending\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})\s+Release Date:\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})/i.exec(reportText);
+  if (!releaseMatch) throw new Error("WPSR release date not found");
+  const releasePeriod = parseDateOnly(releaseMatch[1]);
+  const releaseDate = parseDateOnly(releaseMatch[2]);
+  if (dashboardReleaseDate(stockHistoryHtml) !== releaseDate) throw new Error("WPSR stock dashboard is not updated for the current release");
+  const sourceUpdatedAt = dateAndTimeToUtc(releaseDate, "10:30 AM");
+  const specs = [
+    { metricName: "Crude Oil Inventories", historyLabel: "Commercial Crude Oil (Excl. Lease Stock)", descriptionLabel: "Commercial crude oil inventories excluding the SPR" },
+    { metricName: "Gasoline Inventories", historyLabel: "Total Motor Gasoline", descriptionLabel: "Gasoline inventories" },
+    { metricName: "Distillate Inventories", historyLabel: "Distillate Fuel Oil", descriptionLabel: "Distillate inventories" },
+  ] as const;
+  const metrics: SnapshotBundle["metrics"] = {};
+  for (const spec of specs) {
+    const levels = dashboardLevels(stockHistoryHtml, spec.historyLabel);
+    const currentLevel = levels[levels.length - 1] / 1000;
+    const weekChange = (levels[levels.length - 1] - levels[levels.length - 2]) / 1000;
+    const priorWeekChange = (levels[levels.length - 2] - levels[levels.length - 3]) / 1000;
+    metrics[spec.metricName] = {
+      values: {
+        actualValue: formatNumber(weekChange, 3),
+        previousValue: formatNumber(priorWeekChange, 3),
+        valueUnit: "million barrels",
+        valueSourceUrl: WPSR_STOCK_HISTORY_URL,
+        sourceUpdatedAt,
+        releasePeriod,
+      },
+      description: `${spec.descriptionLabel} ${directionPhrase(weekChange, "million barrels", "from the prior week", 3)} to ${formatNumber(currentLevel, 3)} million barrels.`,
+    };
+  }
+  return { releaseDate, metrics };
+}
+
+function buildWngsrSnapshot(jsonBody: string, stockHistoryHtml: string): SnapshotBundle {
+  const payload = JSON.parse(jsonBody.replace(/^\uFEFF/, "")) as Record<string, unknown>;
   const releaseDate = parseEiaDate(String(payload.release_date ?? ""));
+  if (dashboardReleaseDate(stockHistoryHtml) !== releaseDate) throw new Error("WNGSR stock dashboard is not updated for the current release");
   const sourceUpdatedAt = dateAndTimeToUtc(releaseDate, "10:30 AM");
   const currentWeek = parseEiaDate(String(payload.current_week ?? releaseDate));
   const series = Array.isArray(payload.series) ? payload.series[0] as Record<string, unknown> | undefined : undefined;
@@ -258,36 +330,50 @@ function buildWngsrSnapshot(jsonBody: string): SnapshotBundle {
   const weekAgoRow = data[1] as [string, number];
   const current = parseNumber(String(currentRow[1]));
   const weekAgo = parseNumber(String(weekAgoRow[1]));
-  const fiveYearAvg = parseNumber(String((series.calculated as Record<string, unknown> | undefined)?.["5yr-avg"] ?? ""));
+  const calculated = series.calculated as Record<string, unknown> | undefined;
+  const fiveYearAvg = parseNumber(String(calculated?.["5yr-avg"] ?? ""));
+  const netChange = parseNumber(String(calculated?.net_change ?? current - weekAgo));
+  const priorWeekChange = previousWeeklyChange(stockHistoryHtml, "Total Lower 48 States");
   const metricName = "Natural Gas Storage";
   return {
     releaseDate,
     metrics: {
       [metricName]: {
         values: {
-          actualValue: formatNumber(current, 0),
-          previousValue: formatNumber(weekAgo, 0),
+          actualValue: formatNumber(netChange, 0),
+          previousValue: formatNumber(priorWeekChange, 0),
           valueUnit: "Bcf",
           valueSourceUrl: WNGSR_REPORT_URL,
           sourceUpdatedAt,
+          releasePeriod: currentWeek,
         },
-        description: `Working gas in storage was ${formatNumber(current, 0)} Bcf as of Friday, ${formatDate(currentWeek)}, ${directionPhrase(current - weekAgo, "Bcf", "from the previous week", 0)} and ${comparisonPhrase(current - fiveYearAvg, "Bcf", "the five-year average", 0)}.`,
+        description: `Working gas in storage changed by ${formatNumber(netChange, 0)} Bcf to ${formatNumber(current, 0)} Bcf as of Friday, ${formatDate(currentWeek)}, and was ${comparisonPhrase(current - fiveYearAvg, "Bcf", "the five-year average", 0)}.`,
       },
     },
   };
 }
 
 async function fetchWpsrSnapshot(): Promise<SnapshotBundle> {
-  const [reportHtml, csvBody] = await Promise.all([
+  const [reportHtml, stockHistoryHtml] = await Promise.all([
     fetchText(WPSR_REPORT_URL, { headers: { accept: "text/html" } }, "failed to fetch WPSR report page"),
-    fetchText(WPSR_VALUES_URL, { headers: { accept: "text/csv,text/plain,*/*" } }, "failed to fetch WPSR values"),
+    fetchText(WPSR_STOCK_HISTORY_URL, { headers: { accept: "text/html" } }, "failed to fetch WPSR stock history"),
   ]);
-  return buildWpsrSnapshot(reportHtml, csvBody);
+  try {
+    const csvBody = await fetchText(WPSR_VALUES_URL, { headers: { accept: "text/csv,text/plain,*/*" } }, "failed to fetch WPSR values");
+    return buildWpsrSnapshot(reportHtml, csvBody, stockHistoryHtml);
+  } catch {
+    // CloudFront occasionally rejects Worker downloads for the signed CSV.
+    // The official six-week stock table is sufficient to derive both changes.
+    return buildWpsrSnapshotFromHistory(reportHtml, stockHistoryHtml);
+  }
 }
 
 async function fetchWngsrSnapshot(): Promise<SnapshotBundle> {
-  const jsonBody = await fetchText(WNGSR_VALUES_URL, { headers: { accept: "application/json,text/plain,*/*" } }, "failed to fetch WNGSR values");
-  return buildWngsrSnapshot(jsonBody);
+  const [jsonBody, stockHistoryHtml] = await Promise.all([
+    fetchText(WNGSR_VALUES_URL, { headers: { accept: "application/json,text/plain,*/*" } }, "failed to fetch WNGSR values"),
+    fetchText(WNGSR_STOCK_HISTORY_URL, { headers: { accept: "text/html" } }, "failed to fetch WNGSR stock history"),
+  ]);
+  return buildWngsrSnapshot(jsonBody, stockHistoryHtml);
 }
 
 export class EiaProvider implements EconomicCalendarProvider {

@@ -1,7 +1,25 @@
-import type { AppConfig, Env, Impact, ProviderName } from "./types";
+import type { AppConfig, Env, Impact, NotificationChannel, ProviderName } from "./types";
 import { listSettings } from "./repositories/settings";
 
 export const ALL_PROVIDERS: ProviderName[] = ["bls", "bea", "federal_reserve", "eia", "census", "ism", "umich"];
+export const ALL_NOTIFICATION_CHANNELS: NotificationChannel[] = ["discord", "web_push", "telegram", "email", "slack", "line"];
+
+export function configuredNotificationChannels(env: Env): NotificationChannel[] {
+  return ALL_NOTIFICATION_CHANNELS.filter((channel) => {
+    if (channel === "discord") return Boolean(env.DISCORD_WEBHOOK_URL?.trim());
+    if (channel === "telegram") return Boolean(env.TELEGRAM_BOT_TOKEN?.trim() && env.TELEGRAM_CHAT_ID?.trim());
+    if (channel === "slack") return Boolean(env.SLACK_WEBHOOK_URL?.trim());
+    if (channel === "line") return Boolean(env.LINE_CHANNEL_ACCESS_TOKEN?.trim() && env.LINE_USER_ID?.trim());
+    if (channel === "email") return Boolean(env.EMAIL_API_URL?.trim() && env.EMAIL_API_KEY?.trim() && env.EMAIL_FROM?.trim() && env.EMAIL_TO?.trim());
+    return Boolean(env.WEB_PUSH_GATEWAY_URL?.trim() && env.WEB_PUSH_API_KEY?.trim());
+  });
+}
+
+function parseNotificationChannels(value: string | undefined, configured: NotificationChannel[]): NotificationChannel[] {
+  if (!value?.trim()) return configured;
+  const requested = value.split(",").map((item) => item.trim().toLowerCase()).filter((item): item is NotificationChannel => ALL_NOTIFICATION_CHANNELS.includes(item as NotificationChannel));
+  return [...new Set(requested)].filter((channel) => configured.includes(channel));
+}
 
 function bool(value: string | undefined, fallback: boolean): boolean {
   if (value === undefined) return fallback;
@@ -30,6 +48,7 @@ export function getConfig(env: Env): AppConfig {
     const key = `ENABLE_${provider === "federal_reserve" ? "FEDERAL_RESERVE" : provider.toUpperCase()}` as keyof Env;
     return bool(env[key] as string | undefined, true);
   });
+  const configuredChannels = configuredNotificationChannels(env);
 
   return {
     appTimezone: env.APP_TIMEZONE || "Asia/Taipei",
@@ -40,6 +59,7 @@ export function getConfig(env: Env): AppConfig {
     discordMention: env.DISCORD_MENTION?.trim() ?? "",
     enabledProviders,
     notificationsEnabled: bool(env.NOTIFICATIONS_ENABLED, true),
+    notificationChannels: parseNotificationChannels(env.NOTIFICATION_CHANNELS, configuredChannels),
   };
 }
 
@@ -52,6 +72,7 @@ export type RuntimeSettingsPatch = {
   discordMention?: string;
   notificationsEnabled?: boolean;
   enabledProviders?: ProviderName[];
+  notificationChannels?: NotificationChannel[];
 };
 
 export function publicSettings(config: AppConfig): RuntimeSettingsPatch {
@@ -64,6 +85,7 @@ export function publicSettings(config: AppConfig): RuntimeSettingsPatch {
     discordMention: config.discordMention,
     notificationsEnabled: config.notificationsEnabled,
     enabledProviders: config.enabledProviders,
+    notificationChannels: config.notificationChannels,
   };
 }
 
@@ -78,6 +100,7 @@ function configFromSettings(base: AppConfig, settings: Record<string, string>): 
     discordMention: settings.DISCORD_MENTION?.trim() ?? base.discordMention,
     enabledProviders: ALL_PROVIDERS.filter(providerEnabled),
     notificationsEnabled: bool(settings.NOTIFICATIONS_ENABLED, base.notificationsEnabled),
+    notificationChannels: parseNotificationChannels(settings.NOTIFICATION_CHANNELS, base.notificationChannels),
   };
 }
 
@@ -127,6 +150,10 @@ export function validateSettingsPatch(input: unknown): RuntimeSettingsPatch {
     if (!Array.isArray(value.enabledProviders) || value.enabledProviders.some((item) => !ALL_PROVIDERS.includes(item as ProviderName))) throw new Error("enabledProviders contains an unknown provider");
     patch.enabledProviders = [...new Set(value.enabledProviders as ProviderName[])];
   }
+  if (value.notificationChannels !== undefined) {
+    if (!Array.isArray(value.notificationChannels) || value.notificationChannels.some((item) => !ALL_NOTIFICATION_CHANNELS.includes(item as NotificationChannel))) throw new Error("notificationChannels contains an unknown channel");
+    patch.notificationChannels = [...new Set(value.notificationChannels as NotificationChannel[])];
+  }
   return patch;
 }
 
@@ -148,5 +175,6 @@ export function settingsToRows(patch: RuntimeSettingsPatch): Record<string, stri
     rows.ENABLE_ISM = String(patch.enabledProviders.includes("ism"));
     rows.ENABLE_UMICH = String(patch.enabledProviders.includes("umich"));
   }
+  if (patch.notificationChannels !== undefined) rows.NOTIFICATION_CHANNELS = patch.notificationChannels.join(",");
   return rows;
 }

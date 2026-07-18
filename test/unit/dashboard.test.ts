@@ -15,6 +15,8 @@ describe("dashboard language switcher", () => {
     expect(html).toContain('id="control-center"');
     expect(html).toContain('id="event-detail"');
     expect(html).toContain('class="drawer-ledger"');
+    expect(html).toContain('<h1>關鍵發布監測<span>Official Data Desk</span></h1>');
+    expect(html).not.toContain('<h1>美國經濟事件');
     expect(html.match(/<button[^>]+data-action="sync"/g)).toHaveLength(1);
     expect(html.indexOf('id="stat-events"')).toBeGreaterThan(html.indexOf('id="control-center"'));
     expect(html).not.toContain('class="ledger"');

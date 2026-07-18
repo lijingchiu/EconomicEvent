@@ -100,12 +100,14 @@ const DASHBOARD_HTML = `<!doctype html>
     .control-trigger{height:34px;border:1px solid var(--line-strong);border-radius:999px;padding:0 13px;background:var(--ink);color:var(--paper-2);font:700 9px/1 var(--mono);letter-spacing:.05em;white-space:nowrap;transition:transform .2s,background .2s}
     .control-trigger:hover{transform:translateY(-1px);background:var(--accent)}
     .page{width:min(1440px,calc(100% - 64px));margin:0 auto;padding:42px 0 80px}
-    .hero{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(280px,.45fr);gap:38px;align-items:end;padding:24px 0 34px;border-bottom:1px solid var(--line-strong)}
+    .hero{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(320px,.55fr);gap:46px;align-items:end;padding:18px 0 30px;border-bottom:1px solid var(--line-strong)}
     .section-kicker{display:flex;align-items:center;gap:10px;color:var(--accent);font:600 10px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase}
     .section-kicker:before{content:"";width:30px;height:1px;background:currentColor}
-    .hero h1{max-width:900px;margin:14px 0 14px;font:700 clamp(38px,4.5vw,64px)/1 var(--serif);letter-spacing:-.04em}
-    .hero h1 span{display:block;margin-top:8px;color:var(--accent);font-size:.34em;font-style:italic;letter-spacing:.03em}
-    .hero-intro{max-width:760px;margin:0;color:var(--muted);font-size:12px;line-height:1.8;letter-spacing:.02em}
+    .hero h1{max-width:760px;margin:12px 0 10px;font:650 clamp(28px,3vw,42px)/1.05 var(--serif);letter-spacing:-.025em}
+    .hero h1 span{display:inline-block;margin-left:12px;color:var(--accent);font:700 9px/1 var(--mono);letter-spacing:.13em;text-transform:uppercase;vertical-align:middle}
+    .hero-intro{max-width:720px;margin:0;color:var(--muted);font-size:11px;line-height:1.75;letter-spacing:.02em}
+    .briefing-meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:16px}
+    .briefing-meta span{padding:6px 9px;border:1px solid var(--line);border-radius:999px;color:var(--muted);background:color-mix(in srgb,var(--paper-2) 64%,transparent);font:650 8px/1 var(--mono);letter-spacing:.05em}
     .hero-actions{display:flex;align-items:center;gap:10px;margin-top:26px;flex-wrap:wrap}
     .btn{min-height:42px;border:1px solid var(--line-strong);border-radius:2px;padding:10px 15px;background:transparent;color:var(--ink);font-size:11px;font-weight:700;letter-spacing:.08em;transition:transform .16s,background .16s,color .16s,border-color .16s}
     .btn:hover{transform:translateY(-1px);background:var(--accent-soft)}
@@ -282,8 +284,8 @@ const DASHBOARD_HTML = `<!doctype html>
       .theme-switcher{grid-column:3;justify-self:end}
       .page{width:min(100%,calc(100% - 28px));padding:26px 0 110px}
       .hero{grid-template-columns:1fr;gap:22px;padding:10px 0 28px}
-      .hero h1{font-size:clamp(34px,10vw,48px)}
-      .hero h1 span{font-size:.4em}
+      .hero h1{font-size:clamp(28px,8vw,38px)}
+      .hero h1 span{display:block;margin:8px 0 0;font-size:8px}
       .drawer-ledger{grid-template-columns:repeat(2,minmax(0,1fr))}
       .stat{padding:14px 12px}
       .stat-value{font-size:27px}
@@ -346,9 +348,10 @@ const DASHBOARD_HTML = `<!doctype html>
     <main class="page" id="overview">
       <section class="hero">
         <div>
-          <div class="section-kicker">Daily Macro Brief / 01</div>
-          <h1>美國經濟事件<span>Economic Intelligence Desk</span></h1>
-          <p class="hero-intro">追蹤七個官方來源的經濟數據與央行事件；支援的量化事件會在發布後自動回填 Actual / Prior。清單與月曆可切換，系統操作則集中在頂部控制中心。</p>
+          <div class="section-kicker">Release Monitor / 01</div>
+          <h1>關鍵發布監測<span>Official Data Desk</span></h1>
+          <p class="hero-intro">官方排程與量化數值集中呈現；事件發布後自動回填 Actual / Prior，進階操作收納於頂部控制中心。</p>
+          <div class="briefing-meta"><span>7 個官方來源</span><span>Actual + Prior</span><span>Asia/Taipei</span></div>
         </div>
         <aside class="hero-focus">
           <div class="focus-label"><span>Next Release</span><span id="clock-mini">—</span></div>
@@ -461,6 +464,9 @@ const DASHBOARD_HTML = `<!doctype html>
       i18n['提醒時間於下一次事件同步套用；其他設定立即生效。']='Reminder times apply at the next event sync; other settings take effect immediately.';
       i18n['BLS、EIA、Census、ISM 與 Michigan 的支援事件會在發布後更新官方 Actual / Prior；Forecast 屬市場共識，官方通常不提供。演說、聽證等非量化事件顯示為不適用。']='Supported BLS, EIA, Census, ISM and Michigan events update official Actual / Prior values after release. Forecast is a market consensus value that official sources usually do not provide. Speeches and other qualitative events show Not applicable.';
       i18n['上次同步']='Last sync';
+      i18n['關鍵發布監測']='Key Release Monitor';
+      i18n['官方排程與量化數值集中呈現；事件發布後自動回填 Actual / Prior，進階操作收納於頂部控制中心。']='Official schedules and quantitative values in one focused view. Actual / Prior update after release, while advanced operations stay in the top Control Center.';
+      i18n['7 個官方來源']='7 Official Sources';
       Object.assign(i18n,{'系統脈動':'System Pulse','排程、資料來源與通知頻道的即時摘要。':'Live summary of schedules, providers and notification channels.','等待健康資料':'Waiting for health data','完成登入後自動檢查':'Checked automatically after sign-in','開啟控制中心':'Open Control Center','資料原則':'Data Policy','Actual 與 Prior 只採官方發布值；Forecast 沒有可信來源時保持未提供。':'Actual and Prior use official releases only. Forecast remains unavailable without a trusted source.','事件若已公布但官方值尚未同步，會顯示等待官方資料或來源異常，不再用空白破折號掩蓋狀態。':'Released events show a pending or source-error state instead of an unexplained dash.','即時概覽':'Live Overview','事件、來源與通知佇列的即時狀態。':'Live event, source and notification-queue status.','追蹤七個官方來源的經濟數據與央行事件；支援的量化事件會在發布後自動回填 Actual / Prior。清單與月曆可切換，系統操作則集中在頂部控制中心。':'Track economic releases and central-bank events from seven official sources. Supported quantitative events automatically sync Actual / Prior after release. Switch between list and calendar views; system operations live in the top Control Center.','同步操作':'Sync Operations','重新抓取排程、官方數值或畫面資料。':'Refresh schedules, official values or dashboard data.','排程健康':'Schedule Health','顯示最近成功時間、錯誤與逾時狀態。':'Shows latest success, failures and stale tasks.','通知與資料設定':'Notifications and Data','啟用通知':'Enable notifications','控制所有已設定頻道的事件提醒。':'Controls alerts for every configured channel.','切換通知':'Toggle notifications','通知頻道':'Notification Channels','只有已設定憑證的頻道可以啟用與測試。':'Only channels with configured credentials can be enabled and tested.','事件詳情':'Event Details','載入官方資料中…':'Loading official data…','尚未公布':'Not released','等待官方值':'Waiting for official value','等待前值':'Waiting for prior','未提供':'Not provided','來源異常':'Source error','官方資料':'Official data','已修訂':'Revised','資料待更新':'Pending update','數值歷史':'Value history','尚無數值修訂紀錄':'No value revision history yet','查看完整資料':'View full record','已設定':'Configured','未設定':'Not configured','測試':'Test','通知測試成功':'Notification test succeeded','沒有排程紀錄':'No schedule history','最近完成':'Last completed','執行失敗':'Failed','已逾時':'Stale','運作正常':'Healthy','系統狀態異常':'System degraded','CONTROL CENTER':'CONTROL CENTER'});
       i18n['輸入一次 ADMIN_TOKEN 以建立加密的短期登入工作階段；Token 不會保存在瀏覽器儲存空間。']='Enter ADMIN_TOKEN once to create an encrypted short-lived session. The token is never stored in browser storage.';
       Object.assign(i18n,{'每日摘要':'Daily digest','每天在指定時間整理未來重要事件。':'Summarize upcoming important events at the selected time.','切換每日摘要':'Toggle daily digest','安靜時段':'Quiet hours','此區間不發送即時提醒。':'Instant alerts are suppressed during this interval.','開始':'Start','結束':'End','摘要時間':'Digest','儲存檢視':'Saved Views','保存目前影響程度、分類、來源與清單／月曆模式。':'Save the current impact, category, provider and list or calendar view.','已儲存檢視':'Saved views','新檢視名稱':'New view name','選擇已儲存檢視':'Choose a saved view','例如：高影響能源事件':'For example: High-impact energy','刪除檢視':'Delete view','儲存目前檢視':'Save current view','請輸入檢視名稱':'Enter a view name','檢視已儲存':'View saved','檢視已刪除':'View deleted','加入收藏':'Add favorite','移除收藏':'Remove favorite'});

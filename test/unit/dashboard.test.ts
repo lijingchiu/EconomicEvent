@@ -14,6 +14,10 @@ describe("dashboard language switcher", () => {
     expect(html).toContain("Supported quantitative events automatically sync Actual / Prior");
     expect(html).toContain('id="control-center"');
     expect(html).toContain('id="event-detail"');
+    expect(html).toContain('class="drawer-ledger"');
+    expect(html.match(/<button[^>]+data-action="sync"/g)).toHaveLength(1);
+    expect(html.indexOf('id="stat-events"')).toBeGreaterThan(html.indexOf('id="control-center"'));
+    expect(html).not.toContain('class="ledger"');
     expect(html).toContain("prefers-reduced-motion:reduce");
     expect(html).toContain("/auth/session");
     expect(html).not.toContain("sessionStorage.setItem(tokenKey");

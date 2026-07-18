@@ -1,0 +1,52 @@
+name: Build Macro Pulse macOS DMG
+
+on:
+  push:
+    branches:
+      - agent/macos-app-dmg
+    paths:
+      - ".github/workflows/build-macos-dmg.yml"
+      - "macos/**"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-macos-dmg.yml"
+      - "macos/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build universal macOS app and Widget
+    runs-on: macos-26
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build and package DMG
+        run: bash macos/build-dmg.sh
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MacroPulse-macOS-Universal
+          path: |
+            dist/MacroPulse-macOS-Universal.dmg
+            dist/MacroPulse-macOS-Universal.dmg.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Publish versioned prerelease download
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' macos/MacroPulse/Info.plist)"
+          TAG="macos-v${VERSION}-build-${GITHUB_RUN_NUMBER}"
+          gh release create "${TAG}"             dist/MacroPulse-macOS-Universal.dmg             dist/MacroPulse-macOS-Universal.dmg.sha256             --target "${GITHUB_SHA}"             --prerelease             --title "Macro Pulse macOS ${VERSION} (Build ${GITHUB_RUN_NUMBER})"             --notes "Version ${VERSION} adds in-app update detection with SHA-256 verified DMG downloads, a native WidgetKit status widget, macOS deep links, Liquid Glass controls, Keychain credential storage, and universal Apple Silicon and Intel support. This build uses ad-hoc signing and is not Apple-notarized."
